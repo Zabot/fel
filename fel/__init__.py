@@ -6,6 +6,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 from submit import submit
+from land import land
 
 ssh_re = re.compile("git@github.com:(.*/.*)\.git")
 def parse_url(url):
@@ -25,11 +26,12 @@ username = g.get_user().login.lower()
 gh_slug  = parse_url(list(repo.remote().urls)[0])
 gh_repo = g.get_repo(gh_slug)
 
-bottom = repo.merge_base(top, base_ref)
+bottom = repo.merge_base(top, "origin/master")
 assert len(bottom) == 1
 bottom = bottom[0]
 
 assert repo.is_ancestor(bottom, top)
 
-submit(repo, top, gh_repo, repo.heads['master'], username)
+# submit(repo, top, gh_repo, repo.heads['master'], username)
+land(repo, top, gh_repo, repo.remote().refs['master'], username, top)
 

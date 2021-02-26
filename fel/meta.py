@@ -10,6 +10,8 @@ def parse_meta(m):
     meta_lines = sections[1].strip().split('\n')
     metadata = dict([kv.split(': ') for kv in meta_lines])
 
+    metadata['fel-pr'] = int(metadata['fel-pr'])
+
     return sections[0], metadata
 
 

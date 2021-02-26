@@ -15,7 +15,7 @@ from rebase import tree_rebase
 # Returns the ref that a commit stacked on top of this commit should base its PR
 # on
 def submit(repo, c, gh, upstream, username):
-    logging.info("submitting %s", c)
+    logging.info("submitting %s to %s", c, upstream)
 
     # We can't handle merge commits
     assert len(c.parents) == 1
@@ -27,6 +27,7 @@ def submit(repo, c, gh, upstream, username):
 
     # Make sure that our parent is already submitted
     base_ref, rebased = submit(repo, c.parents[0], gh, upstream, username)
+    logging.info("pr base %s", base_ref)
 
     # If submitting c's parent rebased c, update c to what it was rebased to
     c = rebased.get(c, c)
@@ -45,6 +46,11 @@ def submit(repo, c, gh, upstream, username):
         logging.info("updating PR %s", pr_num)
         diff_branch.set_commit(c)
         repo.remote().push(diff_branch, force=True)
+
+        # Update the base branch (This can happen when a stack gets rebased
+        # after the bottom gets landed)
+        pr = gh.get_pull(pr_num)
+        pr.edit(base = base_ref.remote_head)
 
     except KeyError:
         logging.info("creating a PR")

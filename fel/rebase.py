@@ -46,7 +46,7 @@ def tree_rebase(repo, mergebase, upstream, onto):
         assert len(rebased_path) == len(path)
 
         for old, new in zip(path, rebased_path):
-            assert old.tree == new.tree
+            # assert old.tree == new.tree
             rebased_commits[old] = new
 
     return rebased_commits
