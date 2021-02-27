@@ -7,6 +7,7 @@ logging.basicConfig(level=logging.INFO)
 
 from submit import submit
 from land import land
+from stack import render_stack
 
 ssh_re = re.compile("git@github.com:(.*/.*)\.git")
 def parse_url(url):
@@ -33,5 +34,8 @@ bottom = bottom[0]
 assert repo.is_ancestor(bottom, top)
 
 # submit(repo, top, gh_repo, repo.heads['master'], username)
-land(repo, top, gh_repo, repo.remote().refs['master'], username, top)
+# land(repo, top, gh_repo, repo.remote().refs['master'], username, top)
+
+stack = render_stack(repo, top, repo.heads['master'])
+print(stack)
 
