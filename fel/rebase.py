@@ -3,17 +3,9 @@ from git import Repo, Commit
 import re
 import logging
 
+from util import ancestry_path
 
-def ancestry_path(ancestor, child):
-    lineage = [child]
-    while ancestor != child:
-        assert len(child.parents) == 1
-        child = child.parents[0]
 
-        lineage.append(child)
-
-    return list(reversed(lineage))
-        
 
 # Like a traditional rebase, but also rebases any branches that have a mergebase
 # with the rebased branch
