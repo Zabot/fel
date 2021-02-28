@@ -26,14 +26,11 @@ def render_stack(repo, branch, upstream):
         c = repo.commit(sha)
 
         # Only show the mergebase as a ref
+        summary = ''
         if c == mergebase:
             summary = upstream.name
+            c = None
 
-        # Grab the pr number
-        else:
-            _, meta = parse_meta(c.message)
-            summary = "#{} {}".format(meta['fel-pr'], c.summary)
+        lines.append((sha_re.sub(summary, line), c))
 
-        lines.append(sha_re.sub(summary, line))
-
-    return '\n'.join(lines)
+    return lines

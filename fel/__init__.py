@@ -10,6 +10,8 @@ from github import Github
 from .submit import submit
 from .land import land
 from .stack import render_stack
+from .pr import update_prs
+from .meta import parse_meta
 
 def _submit(repo, gh_repo, args, config):
     submit(repo,
@@ -17,6 +19,12 @@ def _submit(repo, gh_repo, args, config):
            gh_repo,
            repo.heads[config['upstream']],
            config['branch_prefix'])
+
+    tree = render_stack(repo,
+                        repo.head.commit,
+                        repo.heads[config['upstream']])
+
+    update_prs(tree, gh_repo)
 
 def _land(repo, gh_repo, args, config):
     land(repo,
@@ -26,7 +34,21 @@ def _land(repo, gh_repo, args, config):
          config['branch_prefix'])
 
 def _status(repo, gh_repo, args, config):
-    print(render_stack(repo, repo.head.commit, repo.heads[config['upstream']]))
+    tree = render_stack(repo,
+                        repo.head.commit,
+                        repo.heads[config['upstream']])
+
+    for prefix, commit in tree:
+        # If there is no commit for this line, print it without changes
+        if commit is None:
+            print(prefix)
+            continue
+
+        # If there is a commit, get the PR from it
+        _, meta = parse_meta(commit.message)
+        pr_num = meta['fel-pr']
+
+        print("{}#{} {}".format(prefix, pr_num, commit.summary))
 
 def main():
     parser = argparse.ArgumentParser()
