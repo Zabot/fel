@@ -22,15 +22,19 @@ def render_stack(repo, branch, upstream):
     # Expand each sha in the graph
     lines = []
     for line in tree.split('\n'):
-        sha, = sha_re.findall(line)
-        c = repo.commit(sha)
+        try:
+            sha, = sha_re.findall(line)
+            c = repo.commit(sha)
 
-        # Only show the mergebase as a ref
-        summary = ''
-        if c == mergebase:
-            summary = upstream.name
-            c = None
+            # Only show the mergebase as a ref
+            summary = ''
+            if c == mergebase:
+                summary = upstream.name
+                c = None
 
-        lines.append((sha_re.sub(summary, line), c))
+            lines.append((sha_re.sub(summary, line), c))
+
+        except ValueError:
+            lines.append((line, None))
 
     return lines
