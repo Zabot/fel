@@ -36,6 +36,7 @@ def land(repo, c, gh, upstream, branch_prefix):
         if not pr.mergeable:
             logging.error("Can't merge pr %s", pr.mergeable_state)
 
+        print("Landing PR #{} on {}".format(pr_num, pr.base.ref))
         status = pr.merge(merge_method='squash')
         if not status.merged:
             logging.error("Failed to merge pr %s", status.message)

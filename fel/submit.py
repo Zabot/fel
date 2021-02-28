@@ -43,6 +43,7 @@ def submit(repo, c, gh, upstream, branch_prefix):
         diff_branch = repo.heads[meta['fel-branch']]
 
         # Reset the local branch and push to github
+        print("Updating PR #{} to {}".format(pr_num, c))
         logging.info("updating PR %s", pr_num)
         diff_branch.set_commit(c)
         repo.remote().push(diff_branch, force=True)
@@ -53,6 +54,7 @@ def submit(repo, c, gh, upstream, branch_prefix):
         pr.edit(base = base_ref.tracking_branch().remote_head)
 
     except KeyError:
+        print("Submitting PR for {}".format(c))
         logging.info("creating a PR")
 
         # Guess GitHub PR number
