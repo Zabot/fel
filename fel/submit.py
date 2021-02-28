@@ -50,7 +50,7 @@ def submit(repo, c, gh, upstream, branch_prefix):
         # Update the base branch (This can happen when a stack gets rebased
         # after the bottom gets landed)
         pr = gh.get_pull(pr_num)
-        pr.edit(base = base_ref.remote_head)
+        pr.edit(base = base_ref.tracking_branch().remote_head)
 
     except KeyError:
         logging.info("creating a PR")
@@ -59,9 +59,16 @@ def submit(repo, c, gh, upstream, branch_prefix):
         pr_num = gh.get_pulls(state='all')[0].number + 1
         diff_branch = repo.create_head("{}/{}".format(branch_prefix, pr_num), commit=c)
 
+        # Create a remote branch and set diff_branch's tracking branch to it
+        push_info = repo.remote().push(diff_branch)
+        assert len(push_info) == 1
+        diff_branch.set_tracking_branch(push_info[0].remote_ref)
+
         # Push branch to GitHub to create PR. 
-        repo.remote().push(diff_branch)
-        pr = gh.create_pull(title=c.summary, body="", head=diff_branch.name, base=base_ref.name)
+        pr = gh.create_pull(title=summary,
+                            body="",
+                            head=diff_branch.tracking_branch().remote_head,
+                            base=base_ref.tracking_branch().remote_head)
 
         # Update the metadata
         meta['fel-pr'] = pr.number
