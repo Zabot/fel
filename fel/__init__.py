@@ -1,41 +1,109 @@
-from github import Github
-from git import Repo, Commit
-import re
-
+import argparse
+import git
 import logging
-logging.basicConfig(level=logging.INFO)
+import re
+import yaml
 
-from submit import submit
-from land import land
-from stack import render_stack
+from pathlib import Path
+from github import Github
 
-ssh_re = re.compile("git@github.com:(.*/.*)\.git")
-def parse_url(url):
-    m = ssh_re.match(url)
-    if m != None:
-        return m.group(1)
+from .submit import submit
+from .land import land
+from .stack import render_stack
 
-top_ref = 'HEAD'
-base_ref = 'master'
+def _submit(repo, gh_repo, args, config):
+    submit(repo,
+           repo.head.commit,
+           gh_repo,
+           repo.heads[config['upstream']],
+           config['branch_prefix'])
 
-repo = Repo('.')
-top = repo.commit(top_ref)
+def _land(repo, gh_repo, args, config):
+    land(repo,
+         repo.head.commit,
+         gh_repo,
+         repo.remote().refs[config['upstream']],
+         config['branch_prefix'])
 
+def _status(repo, gh_repo, args, config):
+    print(render_stack(repo, repo.head.commit, repo.heads[config['upstream']]))
 
-g = Github("23829d31b8af75fa76549837e0da627a06510722")
-username = g.get_user().login.lower()
-gh_slug  = parse_url(list(repo.remote().urls)[0])
-gh_repo = g.get_repo(gh_slug)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-C',
+                        metavar='path',
+                        type=Path,
+                        help='change directory to path before running fel',
+                        )
+    parser.add_argument('-f', '--config',
+                        metavar='config',
+                        type=Path,
+                        help='fel config file',
+                        default=Path.home().joinpath('.fel.yml'),
+                        )
+    parser.add_argument('--verbose',
+                        action='store_true',
+                        help='display verbose logging information',
+                        )
 
-bottom = repo.merge_base(top, "origin/master")
-assert len(bottom) == 1
-bottom = bottom[0]
+    subparsers = parser.add_subparsers()
 
-assert repo.is_ancestor(bottom, top)
+    submit_parser = subparsers.add_parser('submit')
+    submit_parser.set_defaults(func=_submit)
 
-# submit(repo, top, gh_repo, repo.heads['master'], username)
-# land(repo, top, gh_repo, repo.remote().refs['master'], username, top)
+    land_parser = subparsers.add_parser('land')
+    land_parser.set_defaults(func=_land)
+    
+    status_parser = subparsers.add_parser('status')
+    status_parser.set_defaults(func=_status)
 
-stack = render_stack(repo, top, repo.heads['master'])
-print(stack)
+    args = parser.parse_args()
 
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO)
+
+    # Set default config values
+    config = {
+            'upstream': 'master',
+    }
+
+    # Read config file
+    try:
+        with open(args.config, "r") as config_yaml:
+            loaded_config = yaml.safe_load(config_yaml)
+            if loaded_config is not None:
+                config.update(loaded_config)
+    except IOError as e:
+        logging.error("Could not open config file: %s", e)
+        return 1
+
+    # Check for required fields
+    required_fields = ['gh_token']
+
+    for field in required_fields:
+        if field not in config:
+            logging.error("Missing required config field: %s", field)
+            return 2
+
+    # Find the repo root
+    if args.C:
+        repo_root = args.C
+    else:
+        repo_root = git.Git().rev_parse("--show-toplevel")
+    repo = git.Repo(repo_root)
+
+    # Login to github and find the repo
+    gh_client = Github(config['gh_token'])
+
+    # Get the fel branch prefix
+    username = gh_client.get_user().login.lower()
+    config['branch_prefix'] = "fel/{}".format(username)
+
+    # Find the github repo associated with the local repo's remote
+    remote_url = next(repo.remote().urls)
+    m = re.match("git@github.com:(.*/.*)\.git", remote_url)
+    gh_slug = m.group(1)
+    gh_repo = gh_client.get_repo(gh_slug)
+
+    # Run the sub command
+    args.func(repo, gh_repo, args, config)

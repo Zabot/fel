@@ -1,10 +1,10 @@
 import logging
 
-from meta import parse_meta, dump_meta
-from rebase import tree_rebase
-from submit import submit
+from .meta import parse_meta, dump_meta
+from .rebase import tree_rebase
+from .submit import submit
 
-def land(repo, c, gh, upstream, username, top):
+def land(repo, c, gh, upstream, branch_prefix):
     logging.info("landing %s on %s", c, upstream)
 
     # We can't handle merge commits
@@ -16,13 +16,13 @@ def land(repo, c, gh, upstream, username, top):
         return {}
 
     # Make sure that our parent is already landed
-    rebased = land(repo, c.parents[0], gh, upstream, username, top)
+    rebased = land(repo, c.parents[0], gh, upstream, branch_prefix)
 
     # If landing c's parent rebased c, update c to what it was rebased to
     c = rebased.get(c, c)
 
     # Resubmit to update base branch in case we got rebased
-    submit(repo, c, gh, upstream, username)
+    submit(repo, c, gh, upstream, branch_prefix)
 
     # Tell github to merge the PR
     message, meta = parse_meta(c.message)

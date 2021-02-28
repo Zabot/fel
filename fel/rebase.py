@@ -3,7 +3,7 @@ from git import Repo, Commit
 import re
 import logging
 
-from util import ancestry_path
+from .util import ancestry_path
 
 
 

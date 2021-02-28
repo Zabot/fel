@@ -3,8 +3,8 @@ import logging
 from github import Github
 from git import Repo, Commit
 
-from meta import parse_meta, dump_meta
-from rebase import tree_rebase
+from .meta import parse_meta, dump_meta
+from .rebase import tree_rebase
 
 
 # This is a race condition because there is no way to create a PR without a
@@ -14,7 +14,7 @@ from rebase import tree_rebase
 #
 # Returns the ref that a commit stacked on top of this commit should base its PR
 # on
-def submit(repo, c, gh, upstream, username):
+def submit(repo, c, gh, upstream, branch_prefix):
     logging.info("submitting %s to %s", c, upstream)
 
     # We can't handle merge commits
@@ -26,7 +26,7 @@ def submit(repo, c, gh, upstream, username):
         return upstream, {}
 
     # Make sure that our parent is already submitted
-    base_ref, rebased = submit(repo, c.parents[0], gh, upstream, username)
+    base_ref, rebased = submit(repo, c.parents[0], gh, upstream, branch_prefix)
     logging.info("pr base %s", base_ref)
 
     # If submitting c's parent rebased c, update c to what it was rebased to
@@ -57,7 +57,7 @@ def submit(repo, c, gh, upstream, username):
 
         # Guess GitHub PR number
         pr_num = gh.get_pulls(state='all')[0].number + 1
-        diff_branch = repo.create_head("fel/{}/{}".format(username, pr_num), commit=c)
+        diff_branch = repo.create_head("{}/{}".format(branch_prefix, pr_num), commit=c)
 
         # Push branch to GitHub to create PR. 
         repo.remote().push(diff_branch)

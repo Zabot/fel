@@ -1,7 +1,7 @@
 from re import compile
 
-from util import get_subtree, get_first_unique
-from meta import parse_meta
+from .util import get_subtree, get_first_unique
+from .meta import parse_meta
 
 
 sha_re = compile('[0-9a-f]{40}')
