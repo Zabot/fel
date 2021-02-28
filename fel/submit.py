@@ -65,8 +65,9 @@ def submit(repo, c, gh, upstream, branch_prefix):
         diff_branch.set_tracking_branch(push_info[0].remote_ref)
 
         # Push branch to GitHub to create PR. 
+        summary, body = c.message.split('\n', 1)
         pr = gh.create_pull(title=summary,
-                            body="",
+                            body=body,
                             head=diff_branch.tracking_branch().remote_head,
                             base=base_ref.tracking_branch().remote_head)
 
