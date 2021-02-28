@@ -41,7 +41,7 @@ def land(repo, c, gh, upstream, branch_prefix):
             logging.error("Failed to merge pr %s", status.message)
 
         # Delete the branch
-        # gh.get_branch(pr.head.ref).
+        gh.get_git_ref("heads/{}".format(pr.head.ref)).delete()
         repo.delete_head(diff_branch)
 
         # Fetch the new commits
