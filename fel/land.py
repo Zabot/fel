@@ -43,8 +43,9 @@ def land(repo, c, gh, upstream, branch_prefix):
         # PRs stacked on top of this branch
         repo.delete_head(diff_branch)
 
-        # Fetch the new commits
+        # Fetch the newly landed commit
         repo.remote().fetch()
+        upstream.set_object(upstream.tracking_branch())
 
         # Get the remote ref of upstream
         remote_ref = repo.remote().refs[pr.base.ref]

@@ -30,7 +30,7 @@ def _land(repo, gh_repo, args, config):
     land(repo,
          repo.head.commit,
          gh_repo,
-         repo.remote().refs[config['upstream']],
+         repo.heads[config['upstream']],
          config['branch_prefix'])
 
 def _status(repo, gh_repo, args, config):
