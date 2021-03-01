@@ -8,7 +8,7 @@ the whole stack at once, without polluting your history with extra merge commits
 or requiring the upstream project to use an external tool to land diffs to master.
 
 # Demo
-![Fel Demo GIF](/.images/demo.gif)
+![Fel Demo GIF](https://raw.githubusercontent.com/Zabot/fel/master/.images/demo.gif)
 
 Fel even generates graphs for your PRs to indicate all of the diffs in your stack
 and how they relate.
