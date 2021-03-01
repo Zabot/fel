@@ -33,6 +33,8 @@ def _land(repo, gh_repo, args, config):
          repo.heads[config['upstream']],
          config['branch_prefix'])
 
+    repo.remote().fetch(prune=True)
+
 def _status(repo, gh_repo, args, config):
     tree = render_stack(repo,
                         repo.head.commit,
