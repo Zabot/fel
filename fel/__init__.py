@@ -47,10 +47,15 @@ def _status(repo, gh_repo, args, config):
             continue
 
         # If there is a commit, get the PR from it
-        _, meta = parse_meta(commit.message)
-        pr_num = meta['fel-pr']
+        try:
+            _, meta = parse_meta(commit.message)
+            pr_num = meta['fel-pr']
 
-        print("{}#{} {}".format(prefix, pr_num, commit.summary))
+            print("{}#{} {}".format(prefix, pr_num, commit.summary))
+
+        except KeyError:
+            # Skip commits that haven't been published
+            logging.info("ignoring unpublished commit %s", commit)
 
 def main():
     parser = argparse.ArgumentParser()
