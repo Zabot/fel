@@ -14,7 +14,7 @@ from .rebase import tree_rebase
 #
 # Returns the ref that a commit stacked on top of this commit should base its PR
 # on
-def submit(repo, c, gh, upstream, branch_prefix):
+def submit(repo, c, gh, upstream, branch_prefix, update_only=False):
     logging.info("submitting %s to %s", c, upstream)
 
     # We can't handle merge commits
@@ -26,7 +26,7 @@ def submit(repo, c, gh, upstream, branch_prefix):
         return upstream, {}
 
     # Make sure that our parent is already submitted
-    base_ref, rebased = submit(repo, c.parents[0], gh, upstream, branch_prefix)
+    base_ref, rebased = submit(repo, c.parents[0], gh, upstream, branch_prefix, update_only)
     logging.info("pr base %s", base_ref)
 
     # If submitting c's parent rebased c, update c to what it was rebased to
@@ -54,6 +54,9 @@ def submit(repo, c, gh, upstream, branch_prefix):
         pr.edit(base = base_ref.tracking_branch().remote_head)
 
     except KeyError:
+        if update_only:
+            raise ValueError("Submitting unsubmitted commit with update_only = False")
+
         print("Submitting PR for {}".format(c))
         logging.info("creating a PR")
 

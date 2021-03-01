@@ -21,9 +21,6 @@ def land(repo, c, gh, upstream, branch_prefix):
     # If landing c's parent rebased c, update c to what it was rebased to
     c = rebased.get(c, c)
 
-    # Resubmit to update base branch in case we got rebased
-    submit(repo, c, gh, upstream, branch_prefix)
-
     # Tell github to merge the PR
     message, meta = parse_meta(c.message)
     try:
@@ -42,7 +39,8 @@ def land(repo, c, gh, upstream, branch_prefix):
             logging.error("Failed to merge pr %s", status.message)
 
         # Delete the branch
-        gh.get_git_ref("heads/{}".format(pr.head.ref)).delete()
+        # We can't delete the remote branch right away because that closes any
+        # PRs stacked on top of this branch
         repo.delete_head(diff_branch)
 
         # Fetch the new commits
@@ -58,6 +56,17 @@ def land(repo, c, gh, upstream, branch_prefix):
         # commit, skipping all the intermediate commits)
         rebased = {k: rebased_commits.get(v, v) for k, v in rebased.items()}
         rebased.update(rebased_commits)
+
+        # Resubmit any commands that were rebased by this land
+        for _, new in rebased_commits.items():
+            try:
+                submit(repo, new, gh, upstream, branch_prefix, update_only=True)
+            except ValueError:
+                # If a commit hasn't been submitted yet, skip it
+                pass
+
+        # Delete the remote branch
+        gh.get_git_ref("heads/{}".format(pr.head.ref)).delete()
 
     except KeyError:
         logging.error("Cant land unsubmitted commit")
