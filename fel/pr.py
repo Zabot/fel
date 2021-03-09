@@ -36,15 +36,15 @@ def update_prs(tree, gh_repo):
         pr_num = meta['fel-pr']
         pr = gh_repo.get_pull(pr_num)
 
-        separator = '\n[#]:fel\n'
+        separator = '[#]:fel'
         try:
             block_start = pr.body.index(separator)
-            body = pr.body[0: block_start]
+            body = pr.body[0: block_start].strip()
         except ValueError:
             body = pr.body
 
-        body = ("{original_body}\n"
-                "{separator}\n"
+        body = ("{original_body}"
+                "\n\n{separator}\n\n"
                 "---\n"
                 "This diff is part of a [fel stack](https://github.com/zabot/fel)\n"
                 "<pre>\n"
