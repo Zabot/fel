@@ -131,6 +131,8 @@ def main():
     # Find the github repo associated with the local repo's remote
     remote_url = next(repo.remote().urls)
     m = re.match("git@github.com:(.*/.*)\.git", remote_url)
+    if m is None:
+        m = re.match("https://github.com/(.*/.*)\.git", remote_url)
     gh_slug = m.group(1)
     gh_repo = gh_client.get_repo(gh_slug)
 
