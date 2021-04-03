@@ -70,9 +70,18 @@ def submit(repo, c, gh, upstream, branch_prefix, update_only=False):
         diff_branch.set_tracking_branch(push_info[0].remote_ref)
 
         # Push branch to GitHub to create PR. 
-        summary, body = c.message.split('\n', 1)
+        summary, commit_body = c.message.split('\n', 1)
+        pr_body = commit_body
+        
+        # If this repo has a pull request template, apply it to PR
+        try:
+            pr_template = repo.git.show('HEAD:.github/pull_request_template.md')
+            if pr_template:
+                pr_body = commit_body + '\n\n' + pr_template
+        except:
+            pass
         pr = gh.create_pull(title=summary,
-                            body=body,
+                            body=pr_body,
                             head=diff_branch.tracking_branch().remote_head,
                             base=base_ref.tracking_branch().remote_head)
 
