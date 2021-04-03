@@ -2,6 +2,9 @@
 def ancestry_path(ancestor, child):
     lineage = [child]
     while ancestor != child:
+        if len(child.parents) == 0:
+            raise ValueError("{} is not an ancestor of {}".format(ancestor, child))
+
         assert len(child.parents) == 1
         child = child.parents[0]
 
