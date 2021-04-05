@@ -2,14 +2,7 @@ import pytest
 
 from git import Repo
 
-
 @pytest.fixture
-def upstream(tmpdir_factory, commit):
-    return Repo.init(tmpdir_factory.mktemp("upstream"))
-
-@pytest.fixture
-def origin(repo, tmpdir_factory):
-    return upstream.clone(tmpdir_factory.mktemp("origin"))
 
 @pytest.fixture
 def repo(tmpdir_factory, commit):
