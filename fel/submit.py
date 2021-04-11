@@ -4,7 +4,7 @@ from github import Github
 from git import Repo, Commit
 
 from .meta import parse_meta, dump_meta
-from .rebase import tree_rebase
+from .rebase import subtree_graft
 
 
 # This is a race condition because there is no way to create a PR without a
@@ -62,15 +62,22 @@ def submit(repo, c, gh, upstream, branch_prefix, update_only=False):
 
         # Guess GitHub PR number
         pr_num = gh.get_pulls(state='all')[0].number + 1
-        diff_branch = repo.create_head("{}/{}".format(branch_prefix, pr_num), commit=c)
+        branch = "{}/{}".format(branch_prefix, pr_num)
+        logging.info("creating branch %s for %s", branch, c)
+        diff_branch = repo.create_head(branch, commit=c)
 
         # Create a remote branch and set diff_branch's tracking branch to it
         push_info = repo.remote().push(diff_branch)
         assert len(push_info) == 1
         diff_branch.set_tracking_branch(push_info[0].remote_ref)
 
-        # Push branch to GitHub to create PR. 
-        summary, body = c.message.split('\n', 1)
+        # Push branch to GitHub to create PR.
+        try:
+            summary, body = c.message.split('\n', 1)
+        except ValueError:
+            summary = c.message
+            body = ""
+        logging.info("creating pull for branch %s", branch)
         pr = gh.create_pull(title=summary,
                             body=body,
                             head=diff_branch.tracking_branch().remote_head,
@@ -86,7 +93,7 @@ def submit(repo, c, gh, upstream, branch_prefix, update_only=False):
         repo.remote().push(diff_branch, force=True)
 
         # Restack the commits on top
-        rebased_commits = tree_rebase(repo, c, c, amended)
+        rebased_commits = subtree_graft(repo, c, amended, skip_root=True)
 
         # Update the rebased commits (every key points to the final rebased
         # commit, skipping all the intermediate commits)

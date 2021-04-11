@@ -8,22 +8,25 @@ from .util import ancestry_path, get_subtree
 def tree_rebase(*args):
     pass
 
+# Subtree graft is broken when commits get squashed
 # Rebase an entire subtree rooted at mergebase onto another commit
-def subtree_graft(repo, root, onto):
+def subtree_graft(repo, root, onto, skip_root=False):
     logging.info("rebasing %s onto %s", root, onto)
 
     # Get all of the branches that contain the root commit
     _, heads = get_subtree(repo, root)
 
     # We can't graft a tree rooted at a merge commit
-    assert len(root.parents) == 1
-    root_parent = root.parents[0]
+    if not skip_root:
+        assert len(root.parents) == 1
+        root_parent = root.parents[0]
+    else:
+        root_parent = root
 
     rebased_commits = {root_parent: onto}
     for head in heads:
         path = ancestry_path(root_parent, head.commit)
         assert path[0] == root_parent
-        assert path[1] == root
 
         # Find most recent commit that has been rebased
         recent = root_parent

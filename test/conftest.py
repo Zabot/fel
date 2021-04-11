@@ -1,8 +1,26 @@
 import pytest
 
 from git import Repo
+from unittest.mock import Mock, MagicMock
 
 @pytest.fixture
+def gh(mocker):
+    mock = mocker.MagicMock()
+
+    mock.pulls = [Mock(number=1)]
+
+    def create_pull(**kwargs):
+        kwargs['number'] = len(mock.pulls) + 1
+        pr = Mock(**kwargs)
+        mock.pulls.insert(0, pr)
+        return pr
+
+    def get_pulls(**kwargs):
+        return mock.pulls
+
+    mock.get_pulls.side_effect = get_pulls
+    mock.create_pull.side_effect = create_pull
+    return mock
 
 @pytest.fixture
 def repo(tmpdir_factory, commit):
@@ -76,7 +94,12 @@ def commit():
         commit_number = 0
 
         def _do_commit(self, repo):
+            f = open("{}/{}".format(repo.working_tree_dir, self.commit_number), 'a')
+            f.close()
+
+            repo.index.add([str(self.commit_number)])
             c = repo.index.commit(str(self.commit_number))
+
             self.commit_number += 1
             return c
 
