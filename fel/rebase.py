@@ -12,6 +12,7 @@ def tree_rebase(*args):
 # Rebase an entire subtree rooted at mergebase onto another commit
 def subtree_graft(repo, root, onto, skip_root=False):
     logging.info("rebasing %s onto %s", root, onto)
+    initial_head = repo.head.ref
 
     # Get all of the branches that contain the root commit
     _, heads = get_subtree(repo, root)
@@ -50,5 +51,6 @@ def subtree_graft(repo, root, onto, skip_root=False):
     # We didn't actually rebase the root parent
     del rebased_commits[root_parent]
 
+    initial_head.checkout()
     return rebased_commits
 

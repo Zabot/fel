@@ -4,7 +4,7 @@ from git import Repo
 from unittest.mock import Mock, MagicMock
 
 @pytest.fixture
-def gh(mocker):
+def gh(mocker, repo):
     mock = mocker.MagicMock()
 
     mock.pulls = [Mock(number=1)]
@@ -12,13 +12,31 @@ def gh(mocker):
     def create_pull(**kwargs):
         kwargs['number'] = len(mock.pulls) + 1
         pr = Mock(**kwargs)
+        pr.head = Mock(ref=kwargs['head'])
+        pr.base = Mock(ref='master')
+        pr.mergeable = True
+
+        def merge(**kwargs):
+            repo.heads[pr.head.ref].checkout()
+            repo.git.rebase(pr.base.ref)
+            repo.heads[pr.base.ref].set_commit(pr.head.ref)
+            repo.heads['master'].checkout()
+
+            return Mock(merged=True)
+
+        pr.merge.side_effect = merge
+
         mock.pulls.insert(0, pr)
         return pr
 
     def get_pulls(**kwargs):
         return mock.pulls
 
+    def get_pull(pr_num):
+        return mock.pulls[-pr_num]
+
     mock.get_pulls.side_effect = get_pulls
+    mock.get_pull.side_effect = get_pull
     mock.create_pull.side_effect = create_pull
     return mock
 

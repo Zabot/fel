@@ -1,7 +1,7 @@
 import logging
 
 from .meta import parse_meta, dump_meta
-from .rebase import tree_rebase
+from .rebase import subtree_graft
 from .submit import submit
 
 def land(repo, c, gh, upstream, branch_prefix):
@@ -51,7 +51,7 @@ def land(repo, c, gh, upstream, branch_prefix):
         remote_ref = repo.remote().refs[pr.base.ref]
 
         # rebase all children onto the pr base branch
-        rebased_commits = tree_rebase(repo, c, c, remote_ref.commit)
+        rebased_commits = subtree_graft(repo, c, remote_ref.commit, True)
 
         # Update the rebased commits (every key points to the final rebased
         # commit, skipping all the intermediate commits)
