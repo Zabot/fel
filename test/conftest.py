@@ -5,8 +5,8 @@ from unittest.mock import Mock, MagicMock
 
 
 @pytest.fixture
-def gh(mocker, branching_repo):
-    mock = mocker.MagicMock()
+def gh(branching_repo):
+    mock = MagicMock()
 
     mock.pulls = [Mock(number=1)]
 
