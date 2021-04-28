@@ -1,9 +1,7 @@
-# class FelMeta:
-
-def parse_meta(m):
-    sections = m.split("\n---\n")
+def parse_meta(message):
+    sections = message.split("\n---\n")
     if len(sections) == 1:
-        return m, {}
+        return message, {}
 
     assert len(sections) == 2
 
@@ -18,7 +16,7 @@ def parse_meta(m):
 def dump_meta(message, meta):
 
     message = [message, '\n---']
-    for k, v in meta.items():
-        message.append("{}: {}".format(k, v))
-    
+    for key, value in meta.items():
+        message.append("{}: {}".format(key, value))
+
     return '\n'.join(message)

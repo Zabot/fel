@@ -1,0 +1,11 @@
+[MASTER]
+disable=
+    C0114,
+    C0116,
+
+[BASIC]
+variable-rgx=[a-z_][a-z0-9_]{1,30}$
+
+[DESIGN]
+max-args=7
+max-locals=25

@@ -2,6 +2,9 @@
 def ancestry_path(ancestor, child):
     lineage = [child]
     while ancestor != child:
+        if len(child.parents) == 0:
+            raise ValueError("{} is not an ancestor of {}".format(ancestor, child))
+
         assert len(child.parents) == 1
         child = child.parents[0]
 
@@ -27,7 +30,7 @@ def get_subtree(repo, root):
     # Add all of the commits to the set
     commits = set()
     for head in heads:
-        for c in repo.iter_commits("{}...{}".format(head, root)):
-            commits.add(c)
+        for commit in repo.iter_commits("{}...{}".format(head, root)):
+            commits.add(commit)
 
     return commits, heads

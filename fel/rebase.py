@@ -1,45 +1,49 @@
-from github import Github
-from git import Repo, Commit
-import re
 import logging
 
-from .util import ancestry_path
+from .util import ancestry_path, get_subtree
 
-
-
-# Like a traditional rebase, but also rebases any branches that have a mergebase
-# with the rebased branch
-def tree_rebase(repo, mergebase, upstream, onto):
-    logging.info("rebasing %s onto %s", mergebase, onto)
-    h = repo.head.commit
+# Subtree graft is broken when commits get squashed
+# Rebase an entire subtree rooted at mergebase onto another commit
+def subtree_graft(repo, root, onto, skip_root=False):
+    logging.info("rebasing %s onto %s", root, onto)
+    initial_head = repo.head.ref
 
     # Get all of the branches that contain the root commit
-    heads = [ head for head in repo.heads if repo.is_ancestor(mergebase, head.commit) ]
+    _, heads = get_subtree(repo, root)
 
-    rebased_commits = {mergebase: onto}
+    # We can't graft a tree rooted at a merge commit
+    if not skip_root:
+        assert len(root.parents) == 1
+        root_parent = root.parents[0]
+    else:
+        root_parent = root
+
+    rebased_commits = {root_parent: onto}
     for head in heads:
-        path = ancestry_path(mergebase, head.commit)
+        path = ancestry_path(root_parent, head.commit)
+        assert path[0] == root_parent
 
-        assert path[0] == mergebase
-
-        # Find the newest commit that has been rebased
-        oldest = mergebase
+        # Find most recent commit that has been rebased
+        recent = root_parent
         for commit in path:
             if commit in rebased_commits:
-                oldest = commit
+                recent = commit
 
         # Rebase the part of this branch that hasn't been rebased yet onto its
         # parent in the rebased tree
-        old_head = head.commit
-        output = repo.git.rebase("--onto", rebased_commits[oldest], oldest, head.name)
+        repo.git.rebase("--onto", rebased_commits[recent], recent, head.name)
 
         # Determine the new commits
         rebased_path = ancestry_path(onto, head.commit)
+        logging.debug("%s rebased to %s", path, rebased_path)
         assert len(rebased_path) == len(path)
 
         for old, new in zip(path, rebased_path):
             # assert old.tree == new.tree
             rebased_commits[old] = new
 
-    return rebased_commits
+    # We didn't actually rebase the root parent
+    del rebased_commits[root_parent]
 
+    initial_head.checkout()
+    return rebased_commits
