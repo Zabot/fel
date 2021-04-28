@@ -1,12 +1,6 @@
-from github import Github
-from git import Repo, Commit
-import re
 import logging
 
 from .util import ancestry_path, get_subtree
-
-def tree_rebase(*args):
-    pass
 
 # Subtree graft is broken when commits get squashed
 # Rebase an entire subtree rooted at mergebase onto another commit
@@ -37,7 +31,7 @@ def subtree_graft(repo, root, onto, skip_root=False):
 
         # Rebase the part of this branch that hasn't been rebased yet onto its
         # parent in the rebased tree
-        output = repo.git.rebase("--onto", rebased_commits[recent], recent, head.name)
+        repo.git.rebase("--onto", rebased_commits[recent], recent, head.name)
 
         # Determine the new commits
         rebased_path = ancestry_path(onto, head.commit)
@@ -53,4 +47,3 @@ def subtree_graft(repo, root, onto, skip_root=False):
 
     initial_head.checkout()
     return rebased_commits
-

@@ -1,10 +1,12 @@
 import argparse
-import git
 import logging
 import re
-import yaml
 
 from pathlib import Path
+
+import git
+import yaml
+
 from github import Github
 
 from .submit import submit
@@ -13,7 +15,7 @@ from .stack import render_stack
 from .pr import update_prs
 from .meta import parse_meta
 
-def _submit(repo, gh_repo, args, config):
+def _submit(repo, gh_repo, _, config):
     submit(repo,
            repo.head.commit,
            gh_repo,
@@ -26,7 +28,7 @@ def _submit(repo, gh_repo, args, config):
 
     update_prs(tree, gh_repo)
 
-def _land(repo, gh_repo, args, config):
+def _land(repo, gh_repo, _, config):
     land(repo,
          repo.head.commit,
          gh_repo,
@@ -35,7 +37,7 @@ def _land(repo, gh_repo, args, config):
 
     repo.remote().fetch(prune=True)
 
-def _status(repo, gh_repo, args, config):
+def _status(repo, _, __, config):
     tree = render_stack(repo,
                         repo.head.commit,
                         repo.heads[config['upstream']])
@@ -82,7 +84,7 @@ def main():
 
     land_parser = subparsers.add_parser('land')
     land_parser.set_defaults(func=_land)
-    
+
     status_parser = subparsers.add_parser('status')
     status_parser.set_defaults(func=_status)
 
@@ -102,8 +104,8 @@ def main():
             loaded_config = yaml.safe_load(config_yaml)
             if loaded_config is not None:
                 config.update(loaded_config)
-    except IOError as e:
-        logging.error("Could not open config file: %s", e)
+    except IOError as ex:
+        logging.error("Could not open config file: %s", ex)
         return 1
 
     # Check for required fields
@@ -130,9 +132,11 @@ def main():
 
     # Find the github repo associated with the local repo's remote
     remote_url = next(repo.remote().urls)
-    m = re.match("git@github.com:(.*/.*)\.git", remote_url)
-    gh_slug = m.group(1)
+    match = re.match(r"git@github.com:(.*/.*)\.git", remote_url)
+    gh_slug = match.group(1)
     gh_repo = gh_client.get_repo(gh_slug)
 
     # Run the sub command
     args.func(repo, gh_repo, args, config)
+
+    return 0

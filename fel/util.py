@@ -30,7 +30,7 @@ def get_subtree(repo, root):
     # Add all of the commits to the set
     commits = set()
     for head in heads:
-        for c in repo.iter_commits("{}...{}".format(head, root)):
-            commits.add(c)
+        for commit in repo.iter_commits("{}...{}".format(head, root)):
+            commits.add(commit)
 
     return commits, heads

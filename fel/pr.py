@@ -1,7 +1,6 @@
 import logging
 
 from .meta import parse_meta
-from .stack import render_stack
 
 def update_prs(tree, gh_repo):
     commits = []
