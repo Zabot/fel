@@ -1,4 +1,5 @@
-from fel import submit, land
+from fel.submit import submit
+from fel.land import land
 
 # TODO Breaks when no existing PRS
 def test_submit(branching_repo, clone, gh):
