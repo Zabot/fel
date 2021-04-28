@@ -1,7 +1,7 @@
 import logging
 
 from github import Github
-from git import Repo, Commit
+from git import Repo, Commit, PushInfo
 
 from .meta import parse_meta, dump_meta
 from .rebase import subtree_graft
@@ -43,10 +43,11 @@ def submit(repo, c, gh, upstream, branch_prefix, update_only=False):
         diff_branch = repo.heads[meta['fel-branch']]
 
         # Reset the local branch and push to github
-        print("Updating PR #{} to {}".format(pr_num, c))
         logging.info("updating PR %s", pr_num)
         diff_branch.set_commit(c)
-        repo.remote().push(diff_branch, force=True)
+        push = repo.remote().push(diff_branch, force=True)
+        if push[0].flags & PushInfo.UP_TO_DATE == 0:
+            print("Updated PR #{} to {}".format(pr_num, c))
 
         # Update the base branch (This can happen when a stack gets rebased
         # after the bottom gets landed)

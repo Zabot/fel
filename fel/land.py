@@ -33,7 +33,6 @@ def land(repo, c, gh, upstream, branch_prefix):
         if not pr.mergeable:
             logging.error("Can't merge pr %s", pr.mergeable_state)
 
-        print("Landing PR #{} on {}".format(pr_num, pr.base.ref))
         status = pr.merge(merge_method='squash')
         if not status.merged:
             logging.error("Failed to merge pr %s", status.message)
@@ -49,6 +48,8 @@ def land(repo, c, gh, upstream, branch_prefix):
 
         # Get the remote ref of upstream
         remote_ref = repo.remote().refs[pr.base.ref]
+
+        print("Landed PR #{} on {} as {}".format(pr_num, pr.base.ref, remote_ref.commit))
 
         # rebase all children onto the pr base branch
         rebased_commits = subtree_graft(repo, c, remote_ref.commit, True)

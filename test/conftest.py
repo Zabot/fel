@@ -3,8 +3,9 @@ import pytest
 from git import Repo
 from unittest.mock import Mock, MagicMock
 
+
 @pytest.fixture
-def gh(mocker, repo):
+def gh(mocker, branching_repo):
     mock = mocker.MagicMock()
 
     mock.pulls = [Mock(number=1)]
@@ -17,10 +18,14 @@ def gh(mocker, repo):
         pr.mergeable = True
 
         def merge(**kwargs):
-            repo.heads[pr.head.ref].checkout()
-            repo.git.rebase(pr.base.ref)
-            repo.heads[pr.base.ref].set_commit(pr.head.ref)
-            repo.heads['master'].checkout()
+            branching_repo.heads[pr.base.ref].checkout()
+            branching_repo.git.cherry_pick(branching_repo.heads[pr.head.ref].commit)
+
+            merge = branching_repo.heads[pr.base.ref].commit
+            merge = merge.replace(message="{} ".format(merge.message))
+            branching_repo.heads[pr.base.ref].set_commit(merge)
+
+            branching_repo.heads['master'].checkout()
 
             return Mock(merged=True)
 
