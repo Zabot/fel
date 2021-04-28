@@ -6,9 +6,11 @@ from pathlib import Path
 
 import git
 import yaml
+import requests
 
 from github import Github
 
+from . import __version__
 from .submit import submit
 from .land import land
 from .stack import render_stack
@@ -76,6 +78,10 @@ def main():
                         action='store_true',
                         help='display verbose logging information',
                         )
+    parser.add_argument('--version',
+                        action='store_true',
+                        help='display version information',
+                        )
 
     subparsers = parser.add_subparsers()
 
@@ -90,8 +96,16 @@ def main():
 
     args = parser.parse_args()
 
+    latest = requests.get('https://pypi.org/pypi/fel/json').json()['info']['version']
+    if latest != __version__:
+        print("You are running fel {}, the latest is {}".format(__version__, latest))
+
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
+
+    if args.version:
+        print("fel {} from {}".format(__version__, __file__))
+        return 0
 
     # Set default config values
     config = {
