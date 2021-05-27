@@ -40,7 +40,7 @@ def _land(repo, gh_repo, _, config):
 
     repo.remote().fetch(prune=True)
 
-def _status(repo, _, __, config):
+def _status(repo, gh_repo, __, config):
     tree = render_stack(repo,
                         repo.head.commit,
                         repo.heads[config['upstream']])
@@ -48,7 +48,7 @@ def _status(repo, _, __, config):
     for prefix, commit in tree:
         # If there is no commit for this line, print it without changes
         if commit is None:
-            print(prefix)
+            print("\033[33m{}\033[0m".format(prefix))
             continue
 
         # If there is a commit, get the PR from it
@@ -56,7 +56,17 @@ def _status(repo, _, __, config):
             _, meta = parse_meta(commit.message)
             pr_num = meta['fel-pr']
 
-            print("{}#{} {}".format(prefix, pr_num, commit.summary))
+            pr = gh_repo.get_pull(pr_num)
+
+            # Annotate the line with the status of the commit
+            mergeable = '\033[32m✓\033[0m'
+            if not pr.mergeable:
+                mergeable = '\033[33m! Conflicts\033[0m'
+
+            if pr.mergeable_state == 'blocked':
+                mergeable = '\033[31m✖ Blocked\033[0m'
+
+            print("\033[33m{}#{}\033[0m {} {}".format(prefix, pr_num, mergeable, commit.summary))
 
         except KeyError:
             # Skip commits that haven't been published
