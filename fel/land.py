@@ -1,5 +1,7 @@
 import logging
 
+from github.GithubException import UnknownObjectException
+
 from .meta import parse_meta
 from .rebase import subtree_graft
 from .submit import submit
@@ -67,8 +69,11 @@ def land(repo, commit, gh_repo, upstream, branch_prefix):
                 # If a commit hasn't been submitted yet, skip it
                 pass
 
-        # Delete the remote branch
-        gh_repo.get_git_ref("heads/{}".format(pr.head.ref)).delete()
+        try:
+            # Delete the remote branch
+            gh_repo.get_git_ref("heads/{}".format(pr.head.ref)).delete()
+        except UnknownObjectException:
+            logging.debug("Remote branch was already deleted")
 
     except KeyError:
         logging.error("Cant land unsubmitted commit")
