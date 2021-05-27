@@ -1,12 +1,12 @@
 import logging
 
-from github.GithubException import UnknownObjectException
+from github.GithubException import UnknownObjectException, GithubException
 
 from .meta import parse_meta
 from .rebase import subtree_graft
 from .submit import submit
 
-def land(repo, commit, gh_repo, upstream, branch_prefix):
+def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False):
     logging.info("landing %s on %s", commit, upstream)
 
     # We can't handle merge commits
@@ -18,7 +18,7 @@ def land(repo, commit, gh_repo, upstream, branch_prefix):
         return {}
 
     # Make sure that our parent is already landed
-    rebased = land(repo, commit.parents[0], gh_repo, upstream, branch_prefix)
+    rebased = land(repo, commit.parents[0], gh_repo, upstream, branch_prefix, admin_merge)
 
     # If landing commit's parent rebased commit, update commit to what it was rebased to
     commit = rebased.get(commit, commit)
@@ -33,11 +33,22 @@ def land(repo, commit, gh_repo, upstream, branch_prefix):
         logging.info("merging %s", commit)
         pr = gh_repo.get_pull(pr_num)
         if not pr.mergeable:
-            logging.error("Can't merge pr %s", pr.mergeable_state)
+            logging.error("Can't merge pr due to conflicts")
+            raise SystemExit()
 
-        status = pr.merge(merge_method='squash')
-        if not status.merged:
-            logging.error("Failed to merge pr %s", status.message)
+        if pr.mergeable_state != 'clean' and not admin_merge:
+            logging.error("PR does not pass all checks, run with --admin if you have permissions")
+            raise SystemExit()
+
+        try:
+            status = pr.merge(merge_method='squash')
+            if not status.merged:
+                logging.error("Failed to merge pr %s", status.message)
+                raise SystemExit()
+
+        except GithubException as ex:
+            logging.error("Failed to merge pr %s", ex)
+            raise SystemExit() from ex
 
         # Delete the branch
         # We can't delete the remote branch right away because that closes any

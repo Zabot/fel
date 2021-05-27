@@ -31,12 +31,14 @@ def _submit(repo, gh_repo, _, config):
 
     update_prs(tree, gh_repo)
 
-def _land(repo, gh_repo, _, config):
+def _land(repo, gh_repo, args, config):
     land(repo,
          repo.head.commit,
          gh_repo,
          repo.heads[config['upstream']],
-         config['branch_prefix'])
+         config['branch_prefix'],
+         admin_merge=args.admin,
+         )
 
     repo.remote().fetch(prune=True)
 
@@ -100,6 +102,10 @@ def main():
     submit_parser.set_defaults(func=_submit)
 
     land_parser = subparsers.add_parser('land')
+    land_parser.add_argument('--admin',
+                             action='store_true',
+                             help='admin merge all PRs',
+                             )
     land_parser.set_defaults(func=_land)
 
     status_parser = subparsers.add_parser('status')

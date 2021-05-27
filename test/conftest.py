@@ -16,6 +16,7 @@ def gh(branching_repo):
         pr.head = Mock(ref=kwargs['head'])
         pr.base = Mock(ref='master')
         pr.mergeable = True
+        pr.mergeable_state = 'clean'
 
         def merge(**kwargs):
             branching_repo.heads[pr.base.ref].checkout()
