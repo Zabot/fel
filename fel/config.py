@@ -19,7 +19,7 @@ def load_config(filepath):
             config.update(loaded_config)
 
     for field in required_fields:
-        if field not in config or config['field'] is None:
+        if field not in config or config[field] is None:
             raise KeyError("Missing required config field: %s", field)
 
     return config

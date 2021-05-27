@@ -98,10 +98,10 @@ def main():
 
     try:
         config = load_config(args.config)
-    except IOError ex:
+    except IOError as ex:
         logging.error("Could not open config file: %s", ex)
         return 1
-    except KeyError ex:
+    except KeyError as ex:
         logging.error("Missing required config field: %s", ex)
         return 2
 
