@@ -8,6 +8,7 @@ import git
 import requests
 
 from github import Github
+from github.GithubException import UnknownObjectException
 
 from . import __version__
 from .config import load_config
@@ -134,7 +135,7 @@ def main():
     # Find the github repo associated with the local repo's remote
     try:
         remote_url = next(repo.remote().urls)
-        match = re.match(r"(:?git@|https://)github.com[:/](.*/.*)\.git", remote_url)
+        match = re.match(r"(?:git@|https://)github.com[:/](.*/.*)\.git", remote_url)
         gh_slug = match.group(1)
         gh_repo = gh_client.get_repo(gh_slug)
 
@@ -143,6 +144,10 @@ def main():
 
     except ValueError as ex:
         logging.error("Could not find remote repo: %s", ex)
+        return 3
+
+    except UnknownObjectException as ex:
+        logging.error("Could not find remote repo on github: %s", ex)
         return 3
 
     return 0
