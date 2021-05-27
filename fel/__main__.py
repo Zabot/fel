@@ -17,6 +17,7 @@ from .land import land
 from .stack import render_stack
 from .pr import update_prs
 from .meta import parse_meta
+from .mergeability import is_mergeable
 
 def _submit(repo, gh_repo, _, config):
     submit(repo,
@@ -43,9 +44,10 @@ def _land(repo, gh_repo, args, config):
     repo.remote().fetch(prune=True)
 
 def _status(repo, gh_repo, __, config):
+    upstream = config['upstream']
     tree = render_stack(repo,
                         repo.head.commit,
-                        repo.heads[config['upstream']])
+                        repo.heads[upstream])
 
     for prefix, commit in tree:
         # If there is no commit for this line, print it without changes
@@ -60,15 +62,19 @@ def _status(repo, gh_repo, __, config):
 
             pr = gh_repo.get_pull(pr_num)
 
-            # Annotate the line with the status of the commit
-            mergeable = '\033[32m✓\033[0m'
-            if not pr.mergeable:
-                mergeable = '\033[33m! Conflicts\033[0m'
+            mergeable, message, temp = is_mergeable(pr, upstream)
 
-            if pr.mergeable_state == 'blocked':
-                mergeable = '\033[31m✖ Blocked\033[0m'
+            m = ""
+            if mergeable:
+                m = '\033[32m ✓'
+            elif temp:
+                m = '\033[33m • '
+            else:
+                m = '\033[31m ✖ '
 
-            print("\033[33m{}#{}\033[0m {} {}".format(prefix, pr_num, mergeable, commit.summary))
+            m += message + '\033[0m'
+
+            print("\033[33m{}#{}\033[0m{} {}".format(prefix, pr_num, m, commit.summary))
 
         except KeyError:
             # Skip commits that haven't been published
