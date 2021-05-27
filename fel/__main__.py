@@ -132,13 +132,18 @@ def main():
     config['branch_prefix'] = "fel/{}".format(username)
 
     # Find the github repo associated with the local repo's remote
-    remote_url = next(repo.remote().urls)
-    match = re.match(r"git@github.com:(.*/.*)\.git", remote_url)
-    gh_slug = match.group(1)
-    gh_repo = gh_client.get_repo(gh_slug)
+    try:
+        remote_url = next(repo.remote().urls)
+        match = re.match(r"(:?git@|https://)github.com[:/](.*/.*)\.git", remote_url)
+        gh_slug = match.group(1)
+        gh_repo = gh_client.get_repo(gh_slug)
 
-    # Run the sub command
-    args.func(repo, gh_repo, args, config)
+        # Run the sub command
+        args.func(repo, gh_repo, args, config)
+
+    except ValueError as ex:
+        logging.error("Could not find remote repo: %s", ex)
+        return 3
 
     return 0
 
