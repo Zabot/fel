@@ -5,8 +5,9 @@ from github.GithubException import UnknownObjectException, GithubException
 from .meta import parse_meta
 from .rebase import subtree_graft
 from .submit import submit
+from .mergeability import is_mergeable, wait_for_checks
 
-def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False):
+def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False, wait_for_merge=True):
     logging.info("landing %s on %s", commit, upstream)
 
     # We can't handle merge commits
@@ -32,12 +33,15 @@ def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False):
         # Land the PR
         logging.info("merging %s", commit)
         pr = gh_repo.get_pull(pr_num)
-        if not pr.mergeable:
-            logging.error("Can't merge pr due to conflicts")
-            raise SystemExit()
 
-        if pr.mergeable_state != 'clean' and not admin_merge:
-            logging.error("PR does not pass all checks, run with --admin if you have permissions")
+
+        mergeable, status, wait = is_mergeable(gh_repo, pr, upstream.name)
+
+        if wait and wait_for_merge:
+            mergeable, status = wait_for_checks(gh_repo, pr, upstream.name)
+
+        if not mergeable:
+            logging.error("Merge is blocked, run with --admin to force merge: %s", status)
             raise SystemExit()
 
         try:
