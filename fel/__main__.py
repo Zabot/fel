@@ -5,12 +5,12 @@ import re
 from pathlib import Path
 
 import git
-import yaml
 import requests
 
 from github import Github
 
 from . import __version__
+from .config import load_config
 from .submit import submit
 from .land import land
 from .stack import render_stack
@@ -96,9 +96,19 @@ def main():
 
     args = parser.parse_args()
 
-    latest = requests.get('https://pypi.org/pypi/fel/json').json()['info']['version']
-    if latest != __version__:
-        print("You are running fel {}, the latest is {}".format(__version__, latest))
+    try:
+        config = load_config(args.config)
+    except IOError as ex:
+        logging.error("Could not open config file: %s", ex)
+        return 1
+    except KeyError as ex:
+        logging.error("Missing required config field: %s", ex)
+        return 2
+
+    if config['check_for_updates']:
+        latest = requests.get('https://pypi.org/pypi/fel/json').json()['info']['version']
+        if latest != __version__:
+            print("You are running fel {}, the latest is {}".format(__version__, latest))
 
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
@@ -106,29 +116,6 @@ def main():
     if args.version:
         print("fel {} from {}".format(__version__, __file__))
         return 0
-
-    # Set default config values
-    config = {
-            'upstream': 'master',
-    }
-
-    # Read config file
-    try:
-        with open(args.config, "r") as config_yaml:
-            loaded_config = yaml.safe_load(config_yaml)
-            if loaded_config is not None:
-                config.update(loaded_config)
-    except IOError as ex:
-        logging.error("Could not open config file: %s", ex)
-        return 1
-
-    # Check for required fields
-    required_fields = ['gh_token']
-
-    for field in required_fields:
-        if field not in config:
-            logging.error("Missing required config field: %s", field)
-            return 2
 
     # Find the repo root
     if args.C:
