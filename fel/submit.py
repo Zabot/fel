@@ -61,6 +61,8 @@ def submit(repo, commit, gh_repo, upstream, branch_prefix, update_only=False):
         pr = gh_repo.get_pull(pr_num)
         pr.edit(base = base_ref.tracking_branch().remote_head)
 
+    # If the commit hasn't been submitted before, create a new branch and PR
+    # for it in the remote repo
     except KeyError as ex:
         if update_only:
             raise ValueError("Submitting unsubmitted commit with update_only = False") from ex
@@ -85,6 +87,15 @@ def submit(repo, commit, gh_repo, upstream, branch_prefix, update_only=False):
         except ValueError:
             summary = commit.message
             body = ""
+
+        # If this repo has a pull request template, apply it to PR
+        try:
+            pr_template = repo.git.show('HEAD:.github/pull_request_template.md')
+            if pr_template:
+                body = body + '\n\n' + pr_template
+        except:
+            pass
+
         logging.info("creating pull for branch %s", branch)
         pr = gh_repo.create_pull(title=summary,
                             body=body,
