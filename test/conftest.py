@@ -2,21 +2,52 @@ import pytest
 
 from git import Repo
 from unittest.mock import Mock, MagicMock
-
+from github.GithubException import GithubException
 
 @pytest.fixture
-def gh(branching_repo):
+def pr_factory():
+    def _make(number):
+        pr = Mock()
+
+        pr.number = number
+        pr.get_commits().totalCount = 1
+        pr.get_commits().__getitem__ = Mock()
+        pr.get_commits().__getitem__().get_check_runs.return_value=[]
+        pr.mergeable = True
+        pr.mergeable_state = "clean"
+
+        pr.get_reviews.return_value = []
+        pr.base.repo.get_branch().get_protection.side_effect = GithubException(404, '{"message": "Branch not protected", "documentation_url": "https://docs.github.com/rest/reference/repos#get-branch-protection"}', None)
+
+        return pr
+
+    return _make
+
+@pytest.fixture
+def pr(pr_factory):
+    return pr_factory(1)
+
+@pytest.fixture
+def ppr(pr_factory):
+    pr = pr_factory(1)
+
+    pr.base.repo.get_branch().get_protection.side_effect = None
+    pr.base.repo.get_branch().get_protection.return_value = Mock()
+    pr.base.repo.get_branch().get_protection().required_status_checks = None
+    pr.base.repo.get_branch().get_protection().required_pull_request_reviews = None
+
+    return pr
+
+@pytest.fixture
+def gh(branching_repo, pr_factory):
     mock = MagicMock()
 
-    mock.pulls = [Mock(number=1)]
+    mock.pulls = [pr_factory(1)]
 
     def create_pull(**kwargs):
-        kwargs['number'] = len(mock.pulls) + 1
-        pr = Mock(**kwargs)
-        pr.head = Mock(ref=kwargs['head'])
-        pr.base = Mock(ref='master')
-        pr.mergeable = True
-        pr.mergeable_state = 'clean'
+        pr = pr_factory(len(mock.pulls) + 1)
+        pr.head.ref = kwargs['head']
+        pr.base.ref = 'master'
 
         def merge(**kwargs):
             branching_repo.heads[pr.base.ref].checkout()

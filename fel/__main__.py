@@ -62,7 +62,7 @@ def _status(repo, gh_repo, __, config):
 
             pr = gh_repo.get_pull(pr_num)
 
-            mergeable, message, temp = is_mergeable(pr, upstream)
+            mergeable, message, temp = is_mergeable(gh_repo, pr, upstream)
 
             m = ""
             if mergeable:

@@ -12,6 +12,7 @@ python = "^3.7"
 GitPython = "^3.1.14"
 PyGithub = "^1.55"
 PyYAML = "^5.4.1"
+yaspin = "^2.0.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.4"
