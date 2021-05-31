@@ -49,17 +49,20 @@ def submit(repo, commit, gh_repo, upstream, branch_prefix, update_only=False):
         pr_num = meta['fel-pr']
         diff_branch = repo.heads[meta['fel-branch']]
 
+        # Update the base branch (This can happen when a stack gets rebased
+        # after the bottom gets landed). This causes churn, even if the result
+        # is the same, so don't do it unless we need to
+        pr = gh_repo.get_pull(pr_num)
+
+        if pr.base != base_ref.tracking_branch().remote_head:
+            pr.edit(base = base_ref.tracking_branch().remote_head)
+
         # Reset the local branch and push to github
         logging.info("updating PR %s", pr_num)
         diff_branch.set_commit(commit)
         push = repo.remote().push(diff_branch, force=True)
         if push[0].flags & PushInfo.UP_TO_DATE == 0:
             print("Updated PR #{} to {}".format(pr_num, commit))
-
-        # Update the base branch (This can happen when a stack gets rebased
-        # after the bottom gets landed)
-        pr = gh_repo.get_pull(pr_num)
-        pr.edit(base = base_ref.tracking_branch().remote_head)
 
     # If the commit hasn't been submitted before, create a new branch and PR
     # for it in the remote repo
