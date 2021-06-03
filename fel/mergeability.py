@@ -86,6 +86,23 @@ def is_mergeable(gh_repo, pr, upstream):
             failed += 1
             continue
 
+    # Look for any pending statuses
+    for status in latest.get_statuses():
+        total += 1
+
+        try:
+            required_checks.remove(status.context)
+        except KeyError:
+            pass
+
+        if check.status == 'pending':
+            pending += 1
+            continue
+
+        if check.status == 'failure':
+            failed += 1
+            continue
+
     # If the PR doesn't have the required checks run on it, we may not be close
     # enough to the upstream branch to trigger the checks to run.
     if required_checks:
