@@ -2,7 +2,7 @@
 name = "fel"
 repository = "https://github.com/zabot/fel"
 authors = ["Zach Anderson <zach.inbox@gmail.com>"]
-version = "0.3.1"
+version = "0.3.2"
 description = "A tool for submitting and landing stacked diffs to GitHub"
 readme = "readme.md"
 license = "GPL-3.0-only"
