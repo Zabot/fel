@@ -40,7 +40,7 @@ def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False, wait
         if wait and wait_for_merge:
             mergeable, status = wait_for_checks(gh_repo, pr, upstream.name)
 
-        if not mergeable:
+        if not mergeable and not admin_merge:
             logging.error("Merge is blocked, run with --admin to force merge: %s", status)
             raise SystemExit()
 
