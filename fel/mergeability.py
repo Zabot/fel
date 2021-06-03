@@ -17,10 +17,18 @@ def is_mergeable(gh_repo, pr, upstream):
         return False, "Merge conflicts", False
 
     # Check for any reviews with requested changes
+    reviews = {}
+    for review in pr.get_reviews():
+        submitter = review.user.id
+        try:
+            if review.submitted_at > reviews[submitter].submitted_at:
+                reviews[submitter] = review
+        except KeyError
+            reviews[submitter] = review
+
     changes_requested = 0
     approved = 0
-
-    for review in pr.get_reviews():
+    for review in reviews.values():
         if review.state == 'CHANGES_REQUESTED':
             changes_requested += 1
         elif review.state == 'APPROVED':
