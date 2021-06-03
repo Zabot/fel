@@ -34,6 +34,7 @@ def test_conflict_merge(gh_repo, pr):
 # Landing a pr when changes have been requested
 def test_changes_merge(gh_repo, pr):
     pr.get_reviews.return_value = [Mock()]
+    pr.get_reviews()[0].user.id = 1
     pr.get_reviews()[0].state = 'CHANGES_REQUESTED'
 
     mergeable, status, wait = is_mergeable(gh_repo, pr, upstream)
@@ -82,7 +83,8 @@ def test_missing_reviews(gh_repo, ppr):
 
 # Landing a PR to a protected branch with reviews
 def test_approved_reviews(gh_repo, ppr):
-    ppr.get_reviews.return_value = [Mock]
+    ppr.get_reviews.return_value = [Mock()]
+    ppr.get_reviews()[0].user.id = 1
     ppr.get_reviews()[0].state = 'APPROVED'
     ppr.base.repo.get_branch().get_protection().required_pull_request_reviews = Mock()
     ppr.base.repo.get_branch().get_protection().required_pull_request_reviews.required_approving_review_count = 1
