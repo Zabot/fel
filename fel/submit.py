@@ -2,9 +2,79 @@ import logging
 
 from git import PushInfo
 
-from .meta import parse_meta, dump_meta
+from .meta import parse_meta, dump_meta, meta
 from .rebase import subtree_graft
+from .style import *
+from .stack_spinner import Spinner, ThreadGroup
 
+import yaspin
+import time
+
+def submit_stack(gh_repo, stack, progress):
+    submitted_commits = {}
+    
+    with progress.start('Update PRs'):
+        with ThreadGroup() as tg:
+            for commit in stack.commits():
+                # Determine the base branch
+                parent = commit.parents[0]
+                if stack.repo.is_ancestor(parent, stack.upstream):
+                    base_ref = stack.upstream
+                else:
+                    base_ref = stack.repo.heads[meta(parent, 'fel-branch')]
+
+                diff_branch = stack.repo.heads[meta(commit, 'fel-branch')]
+
+                def submit_commit(commit, base_ref, diff_branch):
+                    try:
+                        pr_num = meta(commit, 'fel-pr')
+
+                        progress[commit] = f"{context}#{pr_num} {info}{{spinner}} updating PR{default} {commit.summary}"
+                        pr = gh_repo.get_pull(pr_num)
+                        base = base_ref.tracking_branch().remote_head
+                        if pr.base.ref != base_ref.tracking_branch().remote_head:
+                            pr.edit(base = base)
+                            progress[commit] = f"{context}#{pr_num} {warn}[updated base to {base}]{default} {commit.summary}"
+                        else:
+                            progress[commit] = f"{context}#{pr_num} {ok}[up to date]{default} {commit.summary}"
+
+                    except KeyError:
+                        progress[commit] = f"{context}{diff_branch} {info}{{spinner}} creating PR{default} {commit.summary}"
+
+                        # Split the commit message to generate a PR title and body
+                        try:
+                            summary, body = commit.message.split('\n', 1)
+                        except ValueError:
+                            summary = commit.message
+                            body = ""
+
+                        # If this repo has a pull request template, apply it to the body
+                        try:
+                            pr_template = repo.git.show('HEAD:.github/pull_request_template.md')
+                            if pr_template:
+                                body = body + '\n\n' + pr_template
+                        except:
+                            pass
+
+                        # logging.info("creating pull for branch %s", branch)
+                        pr = gh_repo.create_pull(title=summary,
+                                            body=body,
+                                            head=diff_branch.tracking_branch().remote_head,
+                                            base=base_ref.tracking_branch().remote_head)
+
+                        progress[commit] = f"{context}#{pr.number} {warn}[created]{default} {commit.summary}"
+                        submitted_commits[commit.hexsha] = pr
+                tg.do(submit_commit, commit, base_ref, diff_branch)
+
+        # Rewrite any commits that were updated with the pull request
+        def update_commit(sha, commit, meta):
+            try:
+                pr = submitted_commits[sha]
+                meta['fel-pr'] = pr.number
+            except KeyError:
+                pass
+
+        stack.filter(update_commit)
 
 # This is a race condition because there is no way to create a PR without a
 # branch. So we guess what the branch number should be, then try and create
