@@ -12,25 +12,33 @@ from github.GithubException import UnknownObjectException
 
 from . import __version__
 from .config import load_config
-from .submit import submit
+from .submit import submit, submit_stack
 from .land import land
-from .stack import render_stack
+from .stack import Stack, StackProgress
 from .pr import update_prs
 from .meta import parse_meta
 from .mergeability import is_mergeable
+from .style import *
+from .stack_spinner import Spinner, ThreadGroup
+import time
 
 def _submit(repo, gh_repo, _, config):
-    submit(repo,
-           repo.head.commit,
-           gh_repo,
-           repo.heads[config['upstream']],
-           config['branch_prefix'])
+    stack = Stack(repo, repo.head.commit, repo.heads[config['upstream']])
+    with Spinner('') as spinner:
+        sp = StackProgress(stack, spinner.print)
+        spinner.label = sp
 
-    tree = render_stack(repo,
-                        repo.head.commit,
-                        repo.heads[config['upstream']])
+        # Update each commit with an index in the stack
+        stack.annotate(sp)
 
-    update_prs(tree, gh_repo)
+        # Update and push all of the stack branches
+        stack.push(sp)
+
+        # Update the PR for each commit in the stack
+        submit_stack(gh_repo, stack, sp)
+
+        # Rewrite the PRs to include the fel stack
+        update_prs(gh_repo, stack, sp)
 
 def _land(repo, gh_repo, args, config):
     land(repo,
@@ -43,42 +51,54 @@ def _land(repo, gh_repo, args, config):
 
     repo.remote().fetch(prune=True)
 
+def _stack(repo, gh_repo, args, config):
+    s = Stack(repo, repo.head.commit, repo.heads[config['upstream']])
+    s.annotate()
+    s.push()
+
 def _status(repo, gh_repo, __, config):
-    upstream = config['upstream']
-    tree = render_stack(repo,
-                        repo.head.commit,
-                        repo.heads[upstream])
+    stack = Stack(repo, repo.head.commit, repo.heads[config['upstream']])
 
-    for prefix, commit in tree:
-        # If there is no commit for this line, print it without changes
-        if commit is None:
-            print("\033[33m{}\033[0m".format(prefix))
-            continue
+    with Spinner('') as spinner:
+        sp = StackProgress(stack, spinner.print)
+        spinner.label = sp
 
-        # If there is a commit, get the PR from it
-        try:
-            _, meta = parse_meta(commit.message)
-            pr_num = meta['fel-pr']
+        with sp.start('Fetching PR Info'):
+            def get_status(commit, pr_num):
+                """Retrieve the status of a pull request"""
+                pr = gh_repo.get_pull(pr_num)
 
-            pr = gh_repo.get_pull(pr_num)
+                mergeable, message, temp = is_mergeable(gh_repo, pr, config['upstream'])
 
-            mergeable, message, temp = is_mergeable(gh_repo, pr, upstream)
+                icon = ""
+                if mergeable:
+                    icon = ok + '✓'
+                elif temp:
+                    icon = warn + '• '
+                else:
+                    icon = fail + '✖ '
 
-            m = ""
-            if mergeable:
-                m = '\033[32m ✓'
-            elif temp:
-                m = '\033[33m • '
-            else:
-                m = '\033[31m ✖ '
+                status = f"{icon}{message}{default}"
 
-            m += message + '\033[0m'
+                sp[commit] = f"{context}#{pr_num}{default} {status} {commit.summary} {dull}{pr_link}{default}"
 
-            print("\033[33m{}#{}\033[0m{} {}".format(prefix, pr_num, m, commit.summary))
+            with ThreadGroup() as tasks:
+                for commit in stack.commits():
+                    _, meta = parse_meta(commit.message)
+                    try:
+                        pr_num = meta['fel-pr']
+                        pr_link = f"{gh_repo.html_url}/pull/{pr_num}"
 
-        except KeyError:
-            # Skip commits that haven't been published
-            logging.info("ignoring unpublished commit %s", commit)
+                        tasks.do(get_status, commit, pr_num)
+                        sp[commit] = f"{context}#{pr_num}{default} {info}{{spinner}} Fetching PR info{default} {commit.summary} {dull}{pr_link}{default}"
+
+                    except KeyError:
+                        try:
+                            branch = meta['fel-branch']
+                            sp[commit] = f"{context}{branch}{default} {commit.summary}"
+
+                        except KeyError:
+                            sp[commit] = f"{context}{commit.hexsha[:8]}{default} {commit.summary}"
 
 def main():
     parser = argparse.ArgumentParser()
@@ -117,7 +137,11 @@ def main():
     status_parser = subparsers.add_parser('status')
     status_parser.set_defaults(func=_status)
 
+    stack_parser = subparsers.add_parser('stack')
+    stack_parser.set_defaults(func=_stack)
+
     args = parser.parse_args()
+
 
     try:
         config = load_config(args.config)
@@ -168,7 +192,9 @@ def main():
 
     except ValueError as ex:
         logging.error("Could not find remote repo: %s", ex)
-        return 3
+
+        # Run the sub command
+        args.func(repo, None, args, config)
 
     except UnknownObjectException as ex:
         logging.error("Could not find remote repo on github: %s", ex)

@@ -84,7 +84,7 @@ def repo(tmpdir_factory, commit):
 
 @pytest.fixture
 def clone(repo, tmpdir_factory):
-    return repo.clone(tmpdir_factory.mktemp("cloned"))
+    return repo.clone(tmpdir_factory.mktemp("cloned"), no_local=True)
 
 # Produces a complex branching repo
 # * 078d4b8 (branch1) 4

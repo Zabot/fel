@@ -1,56 +1,50 @@
 import logging
 
-from .meta import parse_meta
+from .stack_spinner import ThreadGroup
+from .meta import meta
+from .stack import StackProgress
+from .style import *
+import time
 
-def update_prs(tree, gh_repo):
-    commits = []
-    lines = []
-    for prefix, commit in tree:
-        # If there is no commit for this line, print it without changes
-        if commit is None:
-            lines.append(prefix)
-            continue
+def update_prs(gh_repo, stack, progress):
+    with progress.start('Rewriting PRs'):
+        with ThreadGroup() as tg:
+            stack_string = StackProgress(stack, None, None)
+            for commit in stack.commits():
+                pr_num = meta(commit, 'fel-pr')
+                stack_string[commit] = f"<a href=\"{pr_num}\">#{pr_num} {commit.summary}</a>"
 
-        # If there is a commit, get the PR from it
-        try:
-            _, meta = parse_meta(commit.message)
-            pr_num = meta['fel-pr']
+            for commit in stack.commits():
+                def update_pr(commit, pr_num):
+                    try:
+                        progress[commit] = f"{context}#{pr_num} {info}{{spinner}} Rewriting PRs{default} {commit.summary}"
 
-            lines.append("{prefix}<a href=\"{pr}\">#{pr} {summary}</a>"
-                    .format(prefix = prefix,
-                            pr = pr_num,
-                            summary=commit.summary))
+                        pr = gh_repo.get_pull(pr_num)
 
-            commits.append(commit)
+                        separator = '[#]:fel'
+                        try:
+                            block_start = pr.body.index(separator)
+                            body = pr.body[0: block_start].strip()
+                        except ValueError:
+                            body = pr.body
 
-        except KeyError:
-            # Skip commits that haven't been published
-            logging.info("ignoring unpublished commit %s", commit)
+                        new_body = (f"{body}"
+                                    f"\n\n{separator}\n\n"
+                                    f"---\n"
+                                    f"This diff is part of a [fel stack](https://github.com/zabot/fel)\n"
+                                    f"<pre>\n"
+                                    f"{stack_string}\n"
+                                    f"</pre>\n")
 
-    for commit in commits:
-        if commit is None:
-            continue
+                        # Github API uses DOS EOL, strip those so we can compare
+                        if pr.body.replace('\r\n', '\n') != new_body:
+                            pr.edit(body = new_body)
+                            progress[commit] = f"{context}#{pr_num} {warn}[updated body]{default} {commit.summary}"
+                        else:
+                            progress[commit] = f"{context}#{pr_num} {ok}[up to date]{default} {commit.summary}"
 
-        _, meta = parse_meta(commit.message)
-        pr_num = meta['fel-pr']
-        pr = gh_repo.get_pull(pr_num)
+                    except KeyError:
+                        progress[commit] = f"{context}{info}[skipped]{default} {commit.summary}"
 
-        separator = '[#]:fel'
-        try:
-            block_start = pr.body.index(separator)
-            body = pr.body[0: block_start].strip()
-        except ValueError:
-            body = pr.body
-
-        body = ("{original_body}"
-                "\n\n{separator}\n\n"
-                "---\n"
-                "This diff is part of a [fel stack](https://github.com/zabot/fel)\n"
-                "<pre>\n"
-                "{tree}\n"
-                "</pre>\n").format(
-                        original_body=body,
-                        separator=separator,
-                        tree='\n'.join(lines))
-
-        pr.edit(body = body)
+                pr_num = meta(commit, 'fel-pr')
+                tg.do(update_pr, commit, pr_num)

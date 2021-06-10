@@ -2,7 +2,9 @@ from unittest.mock import Mock, call
 
 from github.GithubException import UnknownObjectException
 
-from fel.submit import submit
+from fel.stack import Stack, StackProgress
+from fel.stack_spinner import Spinner
+from fel.submit import submit_stack
 from fel.land import land
 
 # TODO Breaks when no existing PRS
@@ -10,13 +12,18 @@ def test_submit(branching_repo, clone, gh):
     clone.remotes[0].refs['branch1'].checkout()
     head = clone.create_head('branch1')
     head.checkout()
-    submit(clone, head.commit, gh, clone.refs['master'], 'fel')
 
-    assert gh.get_pulls.call_count == 2
+    stack = Stack(clone, head.commit, clone.refs['master'])
+
+    sp = StackProgress(stack, lambda *args: None)
+    stack.annotate(sp)
+    stack.push(sp)
+    submit_stack(gh, stack, sp)
+
     assert gh.create_pull.call_count == 2
 
-    assert branching_repo.heads['fel/2'].commit.summary == '3'
-    assert branching_repo.heads['fel/3'].commit.summary == '4'
+    assert branching_repo.heads['fel/branch1/0'].commit.summary == '3'
+    assert branching_repo.heads['fel/branch1/1'].commit.summary == '4'
 
 # TODO Breaks when no existing PRS
 def test_land(branching_repo, clone, gh):
@@ -40,7 +47,7 @@ def test_land(branching_repo, clone, gh):
     assert_branch(clone, 'master', 4, 3, 14, 13, 6, 5, 2, 1, 0)
 
     # Make sure the remote branches were deleted
-    gh.get_git_ref.assert_has_calls([call('heads/fel/2'), call().delete(), call('heads/fel/3'), call().delete()])
+    gh.get_git_ref.assert_has_calls([call('heads/fel/branch1/0'), call().delete(), call('heads/fel/branch1/1'), call().delete()])
 
 def test_land_with_delete(branching_repo, clone, gh):
     gh.get_git_ref.side_effect = UnknownObjectException(404, '{"message": "Not Found", "documentation_url": "https://docs.github.com/rest"}', None)
@@ -62,22 +69,28 @@ def test_land_with_delete(branching_repo, clone, gh):
     assert_branch(clone, 'master', 4, 3, 14, 13, 6, 5, 2, 1, 0)
 
     # Make sure the remote branches were deleted
-    gh.get_git_ref.assert_has_calls([call('heads/fel/2'), call('heads/fel/3')])
+    gh.get_git_ref.assert_has_calls([call('heads/fel/branch1/0'), call('heads/fel/branch1/1')])
 
 # TODO Breaks when no existing PRS
 def test_big_submit(branching_repo, clone, gh):
     clone.remotes[0].refs['branch2'].checkout()
     head = clone.create_head('branch2')
     head.checkout()
-    submit(clone, head.commit, gh, clone.refs['master'], 'fel')
+    # submit(clone, head.commit, gh, clone.refs['master'], 'fel')
 
-    assert gh.get_pulls.call_count == 4
+    stack = Stack(clone, head.commit, clone.refs['master'])
+
+    sp = StackProgress(stack, lambda *args: None)
+    stack.annotate(sp)
+    stack.push(sp)
+    submit_stack(gh, stack, sp)
+
     assert gh.create_pull.call_count == 4
 
-    assert branching_repo.heads['fel/2'].commit.summary == '7'
-    assert branching_repo.heads['fel/3'].commit.summary == '8'
-    assert branching_repo.heads['fel/4'].commit.summary == '11'
-    assert branching_repo.heads['fel/5'].commit.summary == '12'
+    assert branching_repo.heads['fel/branch2/0'].commit.summary == '7'
+    assert branching_repo.heads['fel/branch2/1'].commit.summary == '8'
+    assert branching_repo.heads['fel/branch2/2'].commit.summary == '11'
+    assert branching_repo.heads['fel/branch2/3'].commit.summary == '12'
 
 # TODO Breaks when no existing PRS
 def test_big_land(branching_repo, clone, gh):
