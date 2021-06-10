@@ -19,6 +19,7 @@ yaspin = "^2.0.0"
 pytest = "^6.2.4"
 pytest-cov = "^2.12.0"
 flake8 = "^3.9.2"
+black = "^21.5b2"
 
 [tool.poetry.scripts]
 fel = "fel.__main__:main"

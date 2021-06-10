@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from github.GithubException import GithubException
 from yaspin import yaspin
 
+
 # Returns two booleans. The first indicates if the PR is mergable, the second
 # indicates if the lack of mergability is worth waiting for
 #
@@ -29,9 +30,9 @@ def is_mergeable(gh_repo, pr, upstream):
     changes_requested = 0
     approved = 0
     for review in reviews.values():
-        if review.state == 'CHANGES_REQUESTED':
+        if review.state == "CHANGES_REQUESTED":
             changes_requested += 1
-        elif review.state == 'APPROVED':
+        elif review.state == "APPROVED":
             approved += 1
 
     # If there are any changes requested, we can't merge
@@ -49,7 +50,7 @@ def is_mergeable(gh_repo, pr, upstream):
 
         # Check for required number of approvals
         required_approvals = protection.required_pull_request_reviews
-        if required_approvals != None:
+        if required_approvals is not None:
             if approved < required_approvals.required_approving_review_count:
                 return False, "Review required", False
 
@@ -78,11 +79,11 @@ def is_mergeable(gh_repo, pr, upstream):
         except KeyError:
             pass
 
-        if check.status != 'completed':
+        if check.status != "completed":
             pending += 1
             continue
 
-        if check.conclusion == 'failure':
+        if check.conclusion == "failure":
             failed += 1
             continue
 
@@ -96,11 +97,11 @@ def is_mergeable(gh_repo, pr, upstream):
         except KeyError:
             pass
 
-        if status.state == 'pending':
+        if status.state == "pending":
             pending += 1
             continue
 
-        if status.state == 'failure':
+        if status.state == "failure":
             failed += 1
             continue
 
@@ -116,27 +117,32 @@ def is_mergeable(gh_repo, pr, upstream):
         return False, "Missing required checks", False
 
     if pending > 0:
-        return False, "Waiting for checks ({} / {})".format(total - pending, total), True
+        return (
+            False,
+            "Waiting for checks ({} / {})".format(total - pending, total),
+            True,
+        )
 
     if failed > 0:
         return False, "Checks failed ({} / {})".format(total - failed, total), False
 
     # If we've checked everything, and the PR is still blocked, give up and notify
     pr = gh_repo.get_pull(pr.number)
-    if pr.mergeable_state != 'clean':
+    if pr.mergeable_state != "clean":
         return False, "Unknown", False
 
     # There should be no way for an unmergeable PR to sneak all the way through
     # to this point
     assert pr.mergeable
-    assert pr.mergeable_state == 'clean'
+    assert pr.mergeable_state == "clean"
 
     return True, "", False
+
 
 def wait_for_checks(gh_repo, pr, upstream, poll_interval=5):
     mergeable, status, wait = is_mergeable(gh_repo, pr, upstream)
 
-    with yaspin(text="#{} {}".format(pr.number, status), color='yellow') as sp:
+    with yaspin(text="#{} {}".format(pr.number, status), color="yellow") as sp:
         while wait:
             sp.text = "#{} {}".format(pr.number, status)
             pr = gh_repo.get_pull(pr.number)
@@ -145,12 +151,12 @@ def wait_for_checks(gh_repo, pr, upstream, poll_interval=5):
             if wait:
                 time.sleep(poll_interval)
 
-        sp.text = ''
+        sp.text = ""
         if mergeable:
-            sp.color = 'green'
+            sp.color = "green"
             sp.ok("✔ #{} Passing".format(pr.number))
-            return True, ''
+            return True, ""
         else:
-            sp.color = 'red'
+            sp.color = "red"
             sp.fail("✖ #{} {}".format(pr.number, status))
             return False, status

@@ -2,6 +2,7 @@ import time
 import sys
 import threading
 
+
 class ThreadGroup:
     def __enter__(self):
         self.pending_threads = []
@@ -21,6 +22,7 @@ class ThreadGroup:
 
     def do(self, function, *args, **kwargs):
         tid = len(self.pending_threads)
+
         def catch_errors(*args, **kwargs):
             try:
                 function(*args, **kwargs)
@@ -32,6 +34,7 @@ class ThreadGroup:
 
         self.pending_threads.append(t)
         return t
+
 
 class Spinner:
     def __init__(self, label):
@@ -49,7 +52,7 @@ class Spinner:
         glyph = self.pattern[frame % len(self.pattern)]
         return str(self.label).format(spinner=glyph)
 
-    def spin(self, clear = True):
+    def spin(self, clear=True):
         """Take over the current thread to display the spinner."""
         # Hide cursor
         sys.stdout.write("\033[?25l")
@@ -65,20 +68,20 @@ class Spinner:
             while self.print_queue:
                 args = self.print_queue.pop(0)
                 for line in " ".join(map(str, args)).split("\n"):
-                    sys.stdout.write('\033[K')
+                    sys.stdout.write("\033[K")
                     sys.stdout.write(line + "\n")
 
-            lines = str(self).split('\n')
+            lines = str(self).split("\n")
             for line in lines:
                 spinner_lines += 1
-                sys.stdout.write('\033[K')
+                sys.stdout.write("\033[K")
                 sys.stdout.write(line + "\n")
 
         # Clear all the spinner lines before exiting
         if clear:
             for _ in range(spinner_lines):
-                sys.stdout.write('\033[1F')
-                sys.stdout.write('\033[K')
+                sys.stdout.write("\033[1F")
+                sys.stdout.write("\033[K")
 
         # Unhide cursor
         sys.stdout.write("\033[?25h")
@@ -99,7 +102,7 @@ class Spinner:
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self.stop()
         self.thread.join()
-        sys.stdout.write('\n')
+        sys.stdout.write("\n")
 
         # print(exc_traceback)
         # print(exc_value)

@@ -1,13 +1,12 @@
-import git
-
 known_metadata = {
-    'fel-stack': None,
-    'fel-stack-index': int,
-    'fel-pr': int,
-    'fel-branch': None,
-    'fel-amended-from': None,
-    'fel-version': None,
+    "fel-stack": None,
+    "fel-stack-index": int,
+    "fel-pr": int,
+    "fel-branch": None,
+    "fel-amended-from": None,
+    "fel-version": None,
 }
+
 
 def parse_meta(message):
     sections = message.split("\n---\n")
@@ -16,9 +15,9 @@ def parse_meta(message):
 
     assert len(sections) == 2
 
-    meta_lines = sections[1].strip().split('\n')
+    meta_lines = sections[1].strip().split("\n")
     # print([kv.split(': ') for kv in meta_lines])
-    metadata = dict([kv.split(': ') for kv in meta_lines])
+    metadata = dict([kv.split(": ") for kv in meta_lines])
 
     for key in metadata:
         try:
@@ -30,12 +29,14 @@ def parse_meta(message):
 
     return sections[0], metadata
 
+
 def dump_meta(message, meta):
-    message = [message, '---']
+    message = [message, "---"]
     for key, value in meta.items():
         message.append("{}: {}".format(key, value))
 
-    return '\n'.join(message)
+    return "\n".join(message)
+
 
 def meta(commit, key):
     _, meta = parse_meta(commit.message)

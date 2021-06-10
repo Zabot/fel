@@ -7,7 +7,16 @@ from .rebase import subtree_graft
 from .submit import submit
 from .mergeability import is_mergeable, wait_for_checks
 
-def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False, wait_for_merge=True):
+
+def land(
+    repo,
+    commit,
+    gh_repo,
+    upstream,
+    branch_prefix,
+    admin_merge=False,
+    wait_for_merge=True,
+):
     logging.info("landing %s on %s", commit, upstream)
 
     # We can't handle merge commits
@@ -19,7 +28,9 @@ def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False, wait
         return {}
 
     # Make sure that our parent is already landed
-    rebased = land(repo, commit.parents[0], gh_repo, upstream, branch_prefix, admin_merge)
+    rebased = land(
+        repo, commit.parents[0], gh_repo, upstream, branch_prefix, admin_merge
+    )
 
     # If landing commit's parent rebased commit, update commit to what it was rebased to
     commit = rebased.get(commit, commit)
@@ -27,13 +38,12 @@ def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False, wait
     # Tell github to merge the PR
     _, meta = parse_meta(commit.message)
     try:
-        pr_num = meta['fel-pr']
-        diff_branch = repo.heads[meta['fel-branch']]
+        pr_num = meta["fel-pr"]
+        diff_branch = repo.heads[meta["fel-branch"]]
 
         # Land the PR
         logging.info("merging %s", commit)
         pr = gh_repo.get_pull(pr_num)
-
 
         mergeable, status, wait = is_mergeable(gh_repo, pr, upstream.name)
 
@@ -41,11 +51,13 @@ def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False, wait
             mergeable, status = wait_for_checks(gh_repo, pr, upstream.name)
 
         if not mergeable and not admin_merge:
-            logging.error("Merge is blocked, run with --admin to force merge: %s", status)
+            logging.error(
+                "Merge is blocked, run with --admin to force merge: %s", status
+            )
             raise SystemExit()
 
         try:
-            status = pr.merge(merge_method='squash')
+            status = pr.merge(merge_method="squash")
             if not status.merged:
                 logging.error("Failed to merge pr %s", status.message)
                 raise SystemExit()
@@ -66,7 +78,9 @@ def land(repo, commit, gh_repo, upstream, branch_prefix, admin_merge=False, wait
         # Get the remote ref of upstream
         remote_ref = repo.remote().refs[pr.base.ref]
 
-        print("Landed PR #{} on {} as {}".format(pr_num, pr.base.ref, remote_ref.commit))
+        print(
+            "Landed PR #{} on {} as {}".format(pr_num, pr.base.ref, remote_ref.commit)
+        )
 
         # rebase all children onto the pr base branch
         rebased_commits = subtree_graft(repo, commit, remote_ref.commit, True)

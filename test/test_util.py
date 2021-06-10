@@ -2,6 +2,7 @@ import pytest
 
 import fel.util
 
+
 def index_map(repo):
     commits = {}
     for head in repo.heads:
@@ -9,6 +10,7 @@ def index_map(repo):
             commits[int(commit.summary)] = commit
 
     return commits
+
 
 def test_ancestry_path(branching_repo):
     commits = index_map(branching_repo)
@@ -41,6 +43,7 @@ def test_ancestry_path(branching_repo):
     with pytest.raises(ValueError):
         p = fel.util.ancestry_path(commits[12], commits[14])
 
+
 def test_unique(branching_repo):
     _commits = index_map(branching_repo)
 
@@ -63,6 +66,7 @@ def test_unique(branching_repo):
     with pytest.raises(IndexError):
         c, mb = fel.util.get_first_unique(branching_repo, _commits[6], _commits[14])
 
+
 # TODO The current behavior of subtree does not include the root commit in the
 #      tree. This may not be the intended behavior.
 def test_subtree(branching_repo):
@@ -70,25 +74,25 @@ def test_subtree(branching_repo):
 
     # Tip of active branch
     commits, branches = fel.util.get_subtree(branching_repo, _commits[14])
-    assert commits == set([ _commits[i] for i in [] ])
-    assert branches == [ branching_repo.refs[b] for b in ['master'] ]
+    assert commits == set([_commits[i] for i in []])
+    assert branches == [branching_repo.refs[b] for b in ["master"]]
 
     # Single child on active branch
     commits, branches = fel.util.get_subtree(branching_repo, _commits[13])
-    assert commits == set([ _commits[i] for i in [14] ])
-    assert branches == [ branching_repo.refs[b] for b in ['master'] ]
+    assert commits == set([_commits[i] for i in [14]])
+    assert branches == [branching_repo.refs[b] for b in ["master"]]
 
     # Tip of inactive branch
     commits, branches = fel.util.get_subtree(branching_repo, _commits[12])
-    assert commits == set([ _commits[i] for i in [] ])
-    assert branches == [ branching_repo.refs[b] for b in ['branch2'] ]
+    assert commits == set([_commits[i] for i in []])
+    assert branches == [branching_repo.refs[b] for b in ["branch2"]]
 
     # single child on inactive branch
     commits, branches = fel.util.get_subtree(branching_repo, _commits[11])
-    assert commits == set([ _commits[i] for i in [12] ])
-    assert branches == [ branching_repo.refs[b] for b in ['branch2'] ]
+    assert commits == set([_commits[i] for i in [12]])
+    assert branches == [branching_repo.refs[b] for b in ["branch2"]]
 
     # Mergebase of two branches
     commits, branches = fel.util.get_subtree(branching_repo, _commits[8])
-    assert commits == set([ _commits[i] for i in [9, 10, 11, 12] ])
-    assert branches == [ branching_repo.refs[b] for b in ['branch2', 'branch3'] ]
+    assert commits == set([_commits[i] for i in [9, 10, 11, 12]])
+    assert branches == [branching_repo.refs[b] for b in ["branch2", "branch3"]]
