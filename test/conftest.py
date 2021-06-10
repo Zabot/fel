@@ -13,7 +13,7 @@ def pr_factory():
         pr.get_commits().totalCount = 1
         pr.get_commits().__getitem__ = Mock()
         pr.get_commits().__getitem__().get_check_runs.return_value=[]
-        pr.get_commits()[0].get_statuses.return_value = []
+        pr.get_commits()[0].get_combined_status().statuses = []
         pr.mergeable = True
         pr.mergeable_state = "clean"
 
