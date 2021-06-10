@@ -2,13 +2,14 @@ import yaml
 
 # These configs are populated by default
 default_config = {
-        'upstream': 'master',
-        'check_for_updates': True,
-        'gh_token': None,
+    "upstream": "master",
+    "check_for_updates": True,
+    "gh_token": None,
 }
 
 # These fields are required to be non-null
-required_fields = ['gh_token']
+required_fields = ["gh_token"]
+
 
 def load_config(filepath):
     config = default_config

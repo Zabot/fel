@@ -25,7 +25,7 @@ def get_first_unique(repo, branch, upstream):
 # Find all of the commits and branches descendant from root in repo
 def get_subtree(repo, root):
     # Get all of the branches that contain the root commit
-    heads = [ head for head in repo.heads if repo.is_ancestor(root, head.commit) ]
+    heads = [head for head in repo.heads if repo.is_ancestor(root, head.commit)]
 
     # Add all of the commits to the set
     commits = set()

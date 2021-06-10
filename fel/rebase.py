@@ -2,6 +2,7 @@ import logging
 
 from .util import ancestry_path, get_subtree
 
+
 # Subtree graft is broken when commits get squashed
 # Rebase an entire subtree rooted at mergebase onto another commit
 def subtree_graft(repo, root, onto, skip_root=False):
