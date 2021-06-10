@@ -87,7 +87,8 @@ def is_mergeable(gh_repo, pr, upstream):
             continue
 
     # Look for any pending statuses
-    for status in latest.get_statuses():
+    combined_status = latest.get_combined_status()
+    for status in combined_status.statuses:
         total += 1
 
         try:
@@ -95,11 +96,11 @@ def is_mergeable(gh_repo, pr, upstream):
         except KeyError:
             pass
 
-        if check.status == 'pending':
+        if status.state == 'pending':
             pending += 1
             continue
 
-        if check.status == 'failure':
+        if status.state == 'failure':
             failed += 1
             continue
 
