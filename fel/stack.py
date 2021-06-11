@@ -41,17 +41,8 @@ class Stack:
     def commits(self):
         """Return all of the commits in this stack."""
 
-        # Find the first commit on branch that isn't in upstream
-        root, _ = get_first_unique(self.repo, self.branch.commit, self.upstream)
-
-        # Find all of the commits in the tree
-        commits, refs = get_subtree(self.repo, root)
-
-        # Find all of the commits between HEAD and mergebase
-        commits.add(root)
-
-        s = [c for c in commits]
-        return s
+        _, commits = self.render_stack(None, None)
+        return commits
 
     def filter(self, callback):
         """Run callback to rewrite every commit in the stack"""
@@ -107,7 +98,7 @@ class Stack:
         stack.
         """
         # The name of the stack is the name of the currently checked out branch
-        stack = self.repo.head.ref
+        stack = self.repo.head.ref.name
 
         with progress.start("Annotating branches", False):
 
@@ -115,7 +106,11 @@ class Stack:
             commit_indexes = {}
 
             def do_annotate(sha, commit, meta):
-                if "fel-stack" not in meta:
+                try:
+                    assert stack == meta["fel-stack"]
+                    stack_index = meta["fel-stack-index"]
+
+                except KeyError:
                     # If this is the first commit in the stack, it has an index of 0
                     if sha == self.root.hexsha:
                         stack_index = 0
@@ -136,10 +131,16 @@ class Stack:
                     meta["fel-version"] = __version__
                     meta["fel-stack"] = stack
                     meta["fel-stack-index"] = stack_index
-                    meta["fel-branch"] = "{}/{}/{}".format(
-                        branch_prefix, meta["fel-stack"], meta["fel-stack-index"]
-                    )
-                    commit_indexes[commit.id] = (stack, stack_index)
+
+                    # If an older version of fel created this commit with a different
+                    # branch, then it won't have a fel-stack. Still use the old
+                    # branch
+                    if "fel-branch" not in meta:
+                        meta["fel-branch"] = "{}/{}/{}".format(
+                            branch_prefix, meta["fel-stack"], meta["fel-stack-index"]
+                        )
+
+                commit_indexes[commit.id] = (stack, stack_index)
 
             # Run do_annotate over all of the commits in this stack
             self.filter(do_annotate)
