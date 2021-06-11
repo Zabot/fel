@@ -89,6 +89,7 @@ def submit_stack(gh_repo, stack, progress):
                 pass
 
         stack.filter(update_commit)
+    progress.update()
 
 
 # This is a race condition because there is no way to create a PR without a
