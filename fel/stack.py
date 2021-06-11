@@ -143,6 +143,7 @@ class Stack:
 
             # Run do_annotate over all of the commits in this stack
             self.filter(do_annotate)
+            progress.update()
 
     # TODO Whitelist to only push certain commits
     def push(self, progress):
@@ -182,9 +183,8 @@ class Stack:
                 else:
                     info_summary = wrap(info_summary, fail)
 
-                progress[commit] = "{}{}{} {} {}".format(
-                    context, pr, default, info_summary, commit.summary
-                )
+                p = f"{context}{pr}{default} {info_summary} {commit.summary}"
+                progress[commit] = p
 
     def render_stack(self, callback, color):
         # Use git log to print an ASCII graph of the tree using only full shas
@@ -231,12 +231,21 @@ class StackProgress:
         self.commits = {}
         self.verbose = verbose
         self.hide_tree = False
+        self.stack = stack
+        self.color = context
 
         skeleton_tree, commits = stack.render_stack(lambda x: None, color)
         for c in commits:
             if c not in self.commits:
                 self.commits[c] = simple_info(c)
 
+        self.skeleton_tree = skeleton_tree
+
+    def update(self):
+        skeleton_tree, commits = self.stack.render_stack(lambda x: None, self.color)
+        for c in commits:
+            if c not in self.commits:
+                self.commits[c] = simple_info(c)
         self.skeleton_tree = skeleton_tree
 
     def all(self, text):
