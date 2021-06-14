@@ -26,7 +26,8 @@ def submit_stack(gh_repo, stack, progress):
 
                 def submit_commit(commit, base_ref, diff_branch):
                     try:
-                        pr_num = meta(commit, "fel-pr")
+                        body, meta = parse_meta(commit.message)
+                        pr_num = meta["fel-pr"]
 
                         progress[
                             commit
@@ -50,7 +51,7 @@ def submit_stack(gh_repo, stack, progress):
 
                         # Split the commit message to generate a PR title and body
                         try:
-                            summary, body = commit.message.split("\n", 1)
+                            summary, body = body.split("\n", 1)
                         except ValueError:
                             summary = commit.message
                             body = ""
