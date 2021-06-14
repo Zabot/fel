@@ -85,6 +85,7 @@ def _status(repo, gh_repo, __, config):
                     icon = style.fail + "✖ "
 
                 status = f"{icon}{message}{style.default}"
+                pr_link = f"{gh_repo.html_url}/pull/{pr_num}"
 
                 sp[
                     commit
