@@ -1,12 +1,5 @@
-__pycache__/
+.direnv
+target/
 
-build/
-dist/
-fel.egg-info/
-
-poetry.lock
-
-*.sw[opn]
-
-.coverage
-pytest-coverage.txt
+result
+result-bin
