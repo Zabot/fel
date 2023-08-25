@@ -14,7 +14,7 @@
       };
 
       rustPkgs = pkgs.rustBuilder.makePackageSet {
-        rustVersion = "1.63.0";
+        rustVersion = "1.70.0";
         packageFun = import ./Cargo.nix;
       };
     in
@@ -28,6 +28,11 @@
           cargo2nix.packages.x86_64-linux.default
           pkgs.rustfmt
           pkgs.go-containerregistry
+
+          # Native dependencies for git2
+          pkgs.pkg-config
+          pkgs.libgit2
+          pkgs.openssl
         ];
       });
     };
