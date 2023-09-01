@@ -1,19 +1,31 @@
 use anyhow::{Context, Result};
+use futures::stream::FuturesUnordered;
+use futures::stream::StreamExt;
 use git2::BranchType;
 use git2::Config;
-use git2::PushOptions;
-use git2::RemoteCallbacks;
 use git2::Repository;
 use git2::Sort;
+use std::sync::Arc;
 
 mod auth;
+mod gh;
 mod metadata;
-use metadata::Commit;
+mod push;
+use push::Pusher;
 
-fn main() -> Result<()> {
+use crate::metadata::Metadata;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // TODO Move these to a config file
+    let gh_pat = std::env::var("GH_PAT").context("GH_PAT undefined")?;
+    let default_remote = "origin";
+    let default_branch = "origin/master";
+
     tracing_subscriber::fmt::init();
 
-    // rewriteRef makes amends and rebases copy the notes from the orginal commit
+    // Make sure that notes.rewriteRef contains the namespace for fel notes so
+    // they are copied along with commits during a rebase or ammend
     let config = Config::open_default().context("failed to open config")?;
     let rewrite_ref = config
         .entries(Some("notes.rewriteref"))
@@ -31,7 +43,7 @@ fn main() -> Result<()> {
     );
 
     // Find the local HEAD
-    let repo = Repository::discover("test").context("failed to open repo")?;
+    let repo = Arc::new(Repository::discover("test").context("failed to open repo")?);
     let head = repo.head().context("failed to get head")?;
     let head_commit = head.peel_to_commit().context("failed to get head commit")?;
     let branch_name = head.shorthand().context("invalid shorthand")?;
@@ -39,7 +51,7 @@ fn main() -> Result<()> {
 
     // Find the remote HEAD
     let default = repo
-        .find_branch("master", BranchType::Local)
+        .find_branch(default_branch, BranchType::Remote)
         .context("failed to find default branch")?;
     let default_commit = default
         .get()
@@ -53,6 +65,7 @@ fn main() -> Result<()> {
         .context("failed to locate merge base")?;
     tracing::debug!(?merge_base, "found merge base");
 
+    // Create an iterator over the stack
     let mut walk = repo.revwalk().context("failed to create revwalk")?;
     walk.push(head_commit.id())
         .context("failed to add commit to revwalk")?;
@@ -60,81 +73,122 @@ fn main() -> Result<()> {
     walk.set_sorting(Sort::REVERSE)
         .context("failed to set sorting")?;
 
-    // Gather up all of the commits, reading their existing metadata
-    let commits: Result<Vec<Commit>> = walk.map(|commit| Commit::new(&repo, commit?)).collect();
-    let mut commits = commits?;
+    // Push every commit
+    let octocrab = octocrab::OctocrabBuilder::default()
+        .personal_token(gh_pat.clone())
+        .build()?;
 
-    tracing::debug!("generating push refspecs");
-    let refspecs: Vec<String> = commits
-        .iter_mut()
-        .enumerate()
-        .map(|(i, c)| {
-            let id = c.id.clone();
-            let metadata = c.metadata();
+    let mut remote = repo
+        .find_remote(default_remote)
+        .context("failed to get remote")?;
 
-            let refspec = match &mut metadata.branch {
-                // If the commit already had a branch, force push it
-                Some(branch) => format!("+{}:{}", id, &branch),
-                // If it didn't generate a new branch
-                branch @ None => {
-                    let branch_name = format!("refs/heads/fel/{}/{}", branch_name, i);
-                    let refspec = format!("{}:{}", id, branch_name);
-                    *branch = Some(branch_name);
-                    refspec
-                }
-            };
-            tracing::debug!(refspec, ?id, "got refspec");
-            refspec
-        })
-        .collect();
+    let gh_repo = gh::get_repo(&remote).context("failed to get repo")?;
 
-    let mut callbacks = RemoteCallbacks::default();
-    callbacks
-        .sideband_progress(|message| {
-            tracing::trace!(message = ?std::str::from_utf8(&message), "sideband progress");
-            true
-        })
-        .push_transfer_progress(|a, b, c| {
-            tracing::trace!(a, b, c, "transfer progress");
-        })
-        .push_negotiation(|updates| {
-            let updates: Vec<_> = updates
-                .iter()
-                .map(|update| (update.src_refname(), update.dst_refname()))
-                .collect();
-            tracing::trace!(?updates, "negotiation");
-            Ok(())
-        })
-        .push_update_reference(|branch, status| {
-            tracing::trace!(branch, status, "update reference");
-            Ok(())
-        });
-
-    tracing::debug!("pushing commits");
-    let mut remote = repo.find_remote("origin").context("failed to get remote")?;
+    tracing::debug!(remote = remote.name(), "connecting to remote");
     let mut conn = remote
         .connect_auth(git2::Direction::Push, Some(auth::callbacks()), None)
-        .context("failed to connect to remote")?;
-    let remote = conn.remote();
-    remote
-        .push(
-            &refspecs,
-            Some(
-                PushOptions::default()
-                    .remote_callbacks(callbacks)
-                    .follow_redirects(git2::RemoteRedirect::All),
-            ),
-        )
-        .context("failed to push")?;
-    tracing::debug!("push finished");
+        .context("failed to connect to repo")?;
+    tracing::debug!(connected = conn.connected(), "remote connected");
 
-    // TODO Create github pullrequests
+    let pusher = Pusher::new();
 
-    tracing::debug!("Writing infos");
-    for commit in commits.iter() {
-        commit
-            .flush_metadata(&repo)
-            .context("failed to flush metadata")?;
+    let futures: FuturesUnordered<_> = walk
+        .enumerate()
+        .map(|(i, oid)| {
+            let repo = &repo;
+            let octocrab = &octocrab;
+            let pusher = &pusher;
+            let gh_repo = &gh_repo;
+            async move {
+                let commit = repo.find_commit(oid?)?;
+                anyhow::ensure!(
+                    commit.parent_count() == 1,
+                    "fel stacks cannot contain merge commits"
+                );
+
+                let metadata = Metadata::new(&repo, commit.id())?;
+                let (branch, force) = match &metadata.branch {
+                    Some(branch) => (branch.clone(), true),
+                    None => (format!("fel/{}/{}", branch_name, i), false),
+                };
+                let branch = pusher
+                    .push(commit.id(), branch, force)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("failed to push branch: {}", error))?;
+
+                // The parent branch is either the default branch, or the pushed branch of the
+                // parent commit
+                let base = if i == 0 {
+                    String::from("master")
+                } else {
+                    pusher.wait(commit.parent_id(0)?).await.map_err(|error| {
+                        anyhow::anyhow!("failed to get parent branch: {}", error)
+                    })?
+                };
+
+                let pr = match metadata.pr {
+                    None => {
+                        tracing::debug!(
+                            owner = gh_repo.owner,
+                            repo = gh_repo.repo,
+                            branch,
+                            base,
+                            "creating PR"
+                        );
+                        octocrab
+                            .pulls(&gh_repo.owner, &gh_repo.repo)
+                            .create(
+                                commit.summary().context("commit header not valid UTF-8")?,
+                                &branch,
+                                &base,
+                            )
+                            .body(commit.body().unwrap_or(""))
+                            .send()
+                            .await
+                            .context("failed to create pr")?
+                    }
+                    Some(pr) => {
+                        tracing::debug!(
+                            pr,
+                            owner = gh_repo.owner,
+                            repo = gh_repo.repo,
+                            base,
+                            "amending PR"
+                        );
+                        octocrab
+                            .pulls(&gh_repo.owner, &gh_repo.repo)
+                            .update(pr)
+                            .base(base)
+                            .send()
+                            .await
+                            .context("failed to update pr")?
+                    }
+                };
+
+                let metadata = Metadata {
+                    pr: Some(pr.number),
+                    branch: Some(branch),
+                };
+                tracing::debug!(?metadata, ?commit, "updating commit metadata");
+                metadata
+                    .write(repo, &commit)
+                    .context("failed to write commit metadata")?;
+                Ok::<_, anyhow::Error>(())
+            }
+        })
+        .collect();
+    let branches = futures.len();
+    let mut futures = futures.collect::<Vec<_>>();
+
+    let results = loop {
+        tokio::select! {
+            push = pusher.send(branches, conn.remote()) => push.context("failed to push")?,
+            r = &mut futures => break r,
+        }
+    };
+
+    for r in results {
+        r.context("failed to update diff")?;
     }
 
     Ok(())
