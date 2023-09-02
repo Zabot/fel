@@ -2,47 +2,46 @@ use anyhow::{Context, Result};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use git2::BranchType;
-use git2::Config;
 use git2::Repository;
 use git2::Sort;
 use std::borrow::Borrow;
 use std::sync::Arc;
 
 mod auth;
+mod config;
 mod gh;
 mod metadata;
 mod push;
 mod update;
-use push::Pusher;
 
+use config::Config;
+use push::Pusher;
 use update::CommitUpdater;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // TODO Move these to a config file
-    let gh_pat = std::env::var("GH_PAT").context("GH_PAT undefined")?;
-    let default_remote = "origin";
-    let default_branch = "origin/master";
-
+    let config = Config::load().context("failed to load config")?;
     tracing_subscriber::fmt::init();
 
     // Make sure that notes.rewriteRef contains the namespace for fel notes so
     // they are copied along with commits during a rebase or ammend
-    let config = Config::open_default().context("failed to open config")?;
-    let rewrite_ref = config
-        .entries(Some("notes.rewriteref"))
-        .context("failed to get notes.rewriteRef")?;
+    {
+        let config = git2::Config::open_default().context("failed to open config")?;
+        let rewrite_ref = config
+            .entries(Some("notes.rewriteref"))
+            .context("failed to get notes.rewriteRef")?;
 
-    let mut found = false;
-    rewrite_ref.for_each(|entry| {
-        if entry.value() == Some("refs/notes/fel") {
-            found = true;
-        }
-    })?;
-    anyhow::ensure!(
-        found,
-        "notes.rewriteRef must include 'refs/notes/fel' for fel to work properly"
-    );
+        let mut found = false;
+        rewrite_ref.for_each(|entry| {
+            if entry.value() == Some("refs/notes/fel") {
+                found = true;
+            }
+        })?;
+        anyhow::ensure!(
+            found,
+            "notes.rewriteRef must include 'refs/notes/fel' for fel to work properly"
+        );
+    }
 
     // Find the local HEAD
     let repo = Arc::new(Repository::discover("test").context("failed to open repo")?);
@@ -53,7 +52,7 @@ async fn main() -> Result<()> {
 
     // Find the remote HEAD
     let default = repo
-        .find_branch(default_branch, BranchType::Remote)
+        .find_branch(&config.default_upstream, BranchType::Remote)
         .context("failed to find default branch")?;
     let default_commit = default
         .get()
@@ -78,12 +77,12 @@ async fn main() -> Result<()> {
     // Push every commit
     let octocrab = Arc::new(
         octocrab::OctocrabBuilder::default()
-            .personal_token(gh_pat.clone())
+            .personal_token(config.token.clone())
             .build()?,
     );
 
     let mut remote = repo
-        .find_remote(default_remote)
+        .find_remote(&config.default_remote)
         .context("failed to get remote")?;
 
     let gh_repo = gh::get_repo(&remote).context("failed to get repo")?;
