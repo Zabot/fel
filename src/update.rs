@@ -99,9 +99,15 @@ impl CommitUpdater {
             }
         };
 
+        let mut history = metadata.history.unwrap_or(Vec::new());
+        history.push(oid.to_string());
+
         let metadata = Metadata {
             pr: Some(pr.number),
             branch: Some(branch),
+            revision: Some(metadata.revision.unwrap_or(0) + 1),
+            commit: Some(oid.to_string()),
+            history: Some(history),
         };
         tracing::debug!(?metadata, ?commit, "updating commit metadata");
         metadata

@@ -7,6 +7,9 @@ pub const NOTE_REF: &str = "refs/notes/fel";
 pub struct Metadata {
     pub branch: Option<String>,
     pub pr: Option<u64>,
+    pub revision: Option<u32>,
+    pub commit: Option<String>,
+    pub history: Option<Vec<String>>,
 }
 
 impl Metadata {
