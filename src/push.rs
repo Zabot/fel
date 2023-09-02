@@ -125,7 +125,7 @@ impl Pusher {
         let mut callbacks = RemoteCallbacks::default();
         callbacks
             .sideband_progress(|message| {
-                tracing::trace!(message = ?std::str::from_utf8(&message), "sideband progress");
+                tracing::trace!(message = ?std::str::from_utf8(message), "sideband progress");
                 true
             })
             .update_tips(|branch, old, new| {

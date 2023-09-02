@@ -16,6 +16,10 @@
       rustPkgs = pkgs.rustBuilder.makePackageSet {
         rustVersion = "1.70.0";
         packageFun = import ./Cargo.nix;
+        extraRustComponents = [
+          "clippy"
+          "rustfmt"
+        ];
       };
     in
     {
@@ -26,7 +30,6 @@
       devShells."x86_64-linux".default = (rustPkgs.workspaceShell {
         nativeBuildInputs = [
           cargo2nix.packages.x86_64-linux.default
-          pkgs.rustfmt
           pkgs.go-containerregistry
 
           # Native dependencies for git2

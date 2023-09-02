@@ -38,7 +38,7 @@ impl CommitUpdater {
             "fel stacks cannot contain merge commits"
         );
 
-        let metadata = Metadata::new(&repo, commit.id())?;
+        let metadata = Metadata::new(repo, commit.id())?;
         let (branch, force) = match &metadata.branch {
             Some(branch) => (branch.clone(), true),
             None => (format!("fel/{}/{}", self.branch_name, index), false),
