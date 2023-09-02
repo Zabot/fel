@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use git2::Remote;
 use git_url_parse::GitUrl;
 
+#[derive(Clone)]
 pub struct GHRepo {
     pub owner: String,
     pub repo: String,

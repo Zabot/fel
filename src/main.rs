@@ -15,6 +15,8 @@ mod push;
 mod update;
 use push::Pusher;
 
+use update::CommitUpdater;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // TODO Move these to a config file
@@ -74,9 +76,11 @@ async fn main() -> Result<()> {
         .context("failed to set sorting")?;
 
     // Push every commit
-    let octocrab = octocrab::OctocrabBuilder::default()
-        .personal_token(gh_pat.clone())
-        .build()?;
+    let octocrab = Arc::new(
+        octocrab::OctocrabBuilder::default()
+            .personal_token(gh_pat.clone())
+            .build()?,
+    );
 
     let mut remote = repo
         .find_remote(default_remote)
@@ -90,21 +94,21 @@ async fn main() -> Result<()> {
         .context("failed to connect to repo")?;
     tracing::debug!(connected = conn.connected(), "remote connected");
 
-    let pusher = Pusher::new();
+    let pusher = Arc::new(Pusher::new());
+
+    let updater = CommitUpdater::new(
+        octocrab.clone(),
+        branch_name,
+        "master",
+        &gh_repo,
+        pusher.clone(),
+    );
 
     let futures: Result<FuturesUnordered<_>> = walk
         .enumerate()
         .map(|(i, oid)| {
             let oid = oid.context("")?;
-            Ok(update::update_commit(
-                i,
-                branch_name,
-                repo.borrow(),
-                &octocrab,
-                &pusher,
-                &gh_repo,
-                oid,
-            ))
+            Ok(updater.update(i, repo.borrow(), oid))
         })
         .collect();
     let futures = futures.context("failed to generate futures")?;
