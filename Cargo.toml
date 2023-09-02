@@ -17,3 +17,4 @@ futures = "0.3.28"
 parking_lot = "0.12.1"
 tokio-stream = "0.1.14"
 thiserror = "1.0.47"
+clap = {version = "4.4.2", features = ["derive"]}

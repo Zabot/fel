@@ -1,6 +1,9 @@
-use anyhow::{Context, Result};
-use git2::Repository;
+use std::path::PathBuf;
 use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use git2::Repository;
 
 mod auth;
 mod config;
@@ -14,8 +17,25 @@ mod update;
 use config::Config;
 use stack::Stack;
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[arg(short = 'C', value_name = "path")]
+    path: PathBuf,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Submit,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
     let config = Config::load().context("failed to load config")?;
     tracing_subscriber::fmt::init();
 
@@ -39,7 +59,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    let repo = Repository::discover("test").context("failed to open repo")?;
+    let repo = Repository::discover(&cli.path).context("failed to open repo")?;
 
     // Push every commit
     let octocrab = Arc::new(
