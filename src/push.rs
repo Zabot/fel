@@ -10,6 +10,14 @@ use git2::RemoteCallbacks;
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, watch};
 
+type PushResult = Result<String, PushError>;
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum PushError {
+    #[error("push rejected by remote: {0}")]
+    Rejected(String),
+}
+
 #[derive(Clone)]
 struct Refspec {
     commit: Oid,
@@ -48,7 +56,7 @@ impl Refspec {
 }
 
 pub struct Pusher {
-    targets: Mutex<HashMap<Oid, watch::Sender<Option<Result<String, String>>>>>,
+    targets: Mutex<HashMap<Oid, watch::Sender<Option<PushResult>>>>,
     refspecs_tx: mpsc::Sender<Refspec>,
     refspecs: tokio::sync::Mutex<mpsc::Receiver<Refspec>>,
 }
@@ -63,7 +71,7 @@ impl Pusher {
         }
     }
 
-    pub async fn push(&self, commit: Oid, branch: String, force: bool) -> Result<String, String> {
+    pub async fn push(&self, commit: Oid, branch: String, force: bool) -> PushResult {
         let refspec = Refspec::new(commit, branch, force);
 
         self.targets.lock().entry(commit).or_insert_with(|| {
@@ -75,7 +83,7 @@ impl Pusher {
         self.wait(commit).await
     }
 
-    pub async fn wait(&self, commit: Oid) -> Result<String, String> {
+    pub async fn wait(&self, commit: Oid) -> PushResult {
         let mut rx = self
             .targets
             .lock()
@@ -155,7 +163,7 @@ impl Pusher {
                 };
 
                 let result = status
-                    .map(|error| Err(error.to_string()))
+                    .map(|error| Err(PushError::Rejected(error.to_string())))
                     .unwrap_or(Ok(refspec.branch.clone()));
                 sender.send_replace(Some(result));
 

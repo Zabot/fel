@@ -47,7 +47,7 @@ impl CommitUpdater {
             .pusher
             .push(commit.id(), branch, force)
             .await
-            .map_err(|error| anyhow::anyhow!("failed to push branch: {}", error))?;
+            .context("failed to push branch")?;
 
         // The parent branch is either the default branch, or the pushed branch of the
         // parent commit
@@ -57,7 +57,7 @@ impl CommitUpdater {
             self.pusher
                 .wait(commit.parent_id(0)?)
                 .await
-                .map_err(|error| anyhow::anyhow!("failed to get parent branch: {}", error))?
+                .context("failed to get parent branch")?
         };
 
         let pr = match metadata.pr {

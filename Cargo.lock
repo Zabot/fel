@@ -238,6 +238,7 @@ dependencies = [
  "octocrab",
  "parking_lot",
  "serde",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "toml",
