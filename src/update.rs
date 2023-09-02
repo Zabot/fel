@@ -32,13 +32,19 @@ impl CommitUpdater {
     }
 
     pub async fn update(&self, index: usize, repo: &Repository, oid: Oid) -> Result<()> {
+        let metadata = Metadata::new(repo, oid)?;
+
+        // If the commit didn't change, we don't need to update anything
+        if metadata.commit == Some(oid.to_string()) {
+            return Ok(());
+        }
+
         let commit = repo.find_commit(oid).context("failed to get commit")?;
         anyhow::ensure!(
             commit.parent_count() == 1,
             "fel stacks cannot contain merge commits"
         );
 
-        let metadata = Metadata::new(repo, commit.id())?;
         let (branch, force) = match &metadata.branch {
             Some(branch) => (branch.clone(), true),
             None => (format!("fel/{}/{}", self.branch_name, index), false),
@@ -98,6 +104,26 @@ impl CommitUpdater {
                     .context("failed to update pr")?
             }
         };
+
+        if let Some(revision) = metadata.revision {
+            if let Some(commit) = metadata.commit {
+                self.octocrab
+                    .issues(&self.gh_repo.owner, &self.gh_repo.repo)
+                    .create_comment(
+                        pr.number,
+                        format!(
+                    "Updated to revision {} [view diff](https://github.com/{}/{}/compare/{}..{})",
+                    revision,
+                    &self.gh_repo.owner,
+                    &self.gh_repo.repo,
+                    commit,
+                    oid
+                ),
+                    )
+                    .await
+                    .context("failed to post update comment")?;
+            }
+        }
 
         let mut history = metadata.history.unwrap_or(Vec::new());
         history.push(oid.to_string());
