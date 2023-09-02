@@ -5,15 +5,15 @@ use git2::BranchType;
 use git2::Config;
 use git2::Repository;
 use git2::Sort;
+use std::borrow::Borrow;
 use std::sync::Arc;
 
 mod auth;
 mod gh;
 mod metadata;
 mod push;
+mod update;
 use push::Pusher;
-
-use crate::metadata::Metadata;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -92,91 +92,22 @@ async fn main() -> Result<()> {
 
     let pusher = Pusher::new();
 
-    let futures: FuturesUnordered<_> = walk
+    let futures: Result<FuturesUnordered<_>> = walk
         .enumerate()
         .map(|(i, oid)| {
-            let repo = &repo;
-            let octocrab = &octocrab;
-            let pusher = &pusher;
-            let gh_repo = &gh_repo;
-            async move {
-                let commit = repo.find_commit(oid?)?;
-                anyhow::ensure!(
-                    commit.parent_count() == 1,
-                    "fel stacks cannot contain merge commits"
-                );
-
-                let metadata = Metadata::new(&repo, commit.id())?;
-                let (branch, force) = match &metadata.branch {
-                    Some(branch) => (branch.clone(), true),
-                    None => (format!("fel/{}/{}", branch_name, i), false),
-                };
-                let branch = pusher
-                    .push(commit.id(), branch, force)
-                    .await
-                    .map_err(|error| anyhow::anyhow!("failed to push branch: {}", error))?;
-
-                // The parent branch is either the default branch, or the pushed branch of the
-                // parent commit
-                let base = if i == 0 {
-                    String::from("master")
-                } else {
-                    pusher.wait(commit.parent_id(0)?).await.map_err(|error| {
-                        anyhow::anyhow!("failed to get parent branch: {}", error)
-                    })?
-                };
-
-                let pr = match metadata.pr {
-                    None => {
-                        tracing::debug!(
-                            owner = gh_repo.owner,
-                            repo = gh_repo.repo,
-                            branch,
-                            base,
-                            "creating PR"
-                        );
-                        octocrab
-                            .pulls(&gh_repo.owner, &gh_repo.repo)
-                            .create(
-                                commit.summary().context("commit header not valid UTF-8")?,
-                                &branch,
-                                &base,
-                            )
-                            .body(commit.body().unwrap_or(""))
-                            .send()
-                            .await
-                            .context("failed to create pr")?
-                    }
-                    Some(pr) => {
-                        tracing::debug!(
-                            pr,
-                            owner = gh_repo.owner,
-                            repo = gh_repo.repo,
-                            base,
-                            "amending PR"
-                        );
-                        octocrab
-                            .pulls(&gh_repo.owner, &gh_repo.repo)
-                            .update(pr)
-                            .base(base)
-                            .send()
-                            .await
-                            .context("failed to update pr")?
-                    }
-                };
-
-                let metadata = Metadata {
-                    pr: Some(pr.number),
-                    branch: Some(branch),
-                };
-                tracing::debug!(?metadata, ?commit, "updating commit metadata");
-                metadata
-                    .write(repo, &commit)
-                    .context("failed to write commit metadata")?;
-                Ok::<_, anyhow::Error>(())
-            }
+            let oid = oid.context("")?;
+            Ok(update::update_commit(
+                i,
+                branch_name,
+                repo.borrow(),
+                &octocrab,
+                &pusher,
+                &gh_repo,
+                oid,
+            ))
         })
         .collect();
+    let futures = futures.context("failed to generate futures")?;
     let branches = futures.len();
     let mut futures = futures.collect::<Vec<_>>();
 
