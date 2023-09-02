@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use git2::{Oid, Repository};
+use git2::Repository;
 use octocrab::Octocrab;
 
-use crate::{gh::GHRepo, metadata::Metadata, push::Pusher};
+use crate::{gh::GHRepo, metadata::Metadata, push::Pusher, stack::Commit};
 
 pub struct CommitUpdater {
     octocrab: Arc<Octocrab>,
@@ -31,21 +31,19 @@ impl CommitUpdater {
         }
     }
 
-    pub async fn update(&self, index: usize, repo: &Repository, oid: Oid) -> Result<()> {
-        let metadata = Metadata::new(repo, oid)?;
-
+    pub async fn update(&self, index: usize, repo: &Repository, c: &Commit) -> Result<()> {
         // If the commit didn't change, we don't need to update anything
-        if metadata.commit == Some(oid.to_string()) {
+        if c.metadata.commit == Some(c.id.to_string()) {
             return Ok(());
         }
 
-        let commit = repo.find_commit(oid).context("failed to get commit")?;
+        let commit = repo.find_commit(c.id).context("failed to get commit")?;
         anyhow::ensure!(
             commit.parent_count() == 1,
             "fel stacks cannot contain merge commits"
         );
 
-        let (branch, force) = match &metadata.branch {
+        let (branch, force) = match &c.metadata.branch {
             Some(branch) => (branch.clone(), true),
             None => (format!("fel/{}/{}", self.branch_name, index), false),
         };
@@ -66,7 +64,7 @@ impl CommitUpdater {
                 .context("failed to get parent branch")?
         };
 
-        let pr = match metadata.pr {
+        let pr = match c.metadata.pr {
             None => {
                 tracing::debug!(
                     owner = self.gh_repo.owner,
@@ -105,8 +103,8 @@ impl CommitUpdater {
             }
         };
 
-        if let Some(revision) = metadata.revision {
-            if let Some(commit) = metadata.commit {
+        if let Some(revision) = c.metadata.revision {
+            if let Some(commit) = &c.metadata.commit {
                 self.octocrab
                     .issues(&self.gh_repo.owner, &self.gh_repo.repo)
                     .create_comment(
@@ -117,7 +115,7 @@ impl CommitUpdater {
                     &self.gh_repo.owner,
                     &self.gh_repo.repo,
                     commit,
-                    oid
+                    c.id,
                 ),
                     )
                     .await
@@ -125,14 +123,14 @@ impl CommitUpdater {
             }
         }
 
-        let mut history = metadata.history.unwrap_or(Vec::new());
-        history.push(oid.to_string());
+        let mut history = c.metadata.history.clone().unwrap_or(Vec::new());
+        history.push(c.id.to_string());
 
         let metadata = Metadata {
             pr: Some(pr.number),
             branch: Some(branch),
-            revision: Some(metadata.revision.unwrap_or(0) + 1),
-            commit: Some(oid.to_string()),
+            revision: Some(c.metadata.revision.unwrap_or(0) + 1),
+            commit: Some(c.id.to_string()),
             history: Some(history),
         };
         tracing::debug!(?metadata, ?commit, "updating commit metadata");

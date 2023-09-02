@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
-use git2::BranchType;
 use git2::Repository;
-use git2::Sort;
 use std::borrow::Borrow;
 use std::sync::Arc;
 
@@ -12,10 +10,12 @@ mod config;
 mod gh;
 mod metadata;
 mod push;
+mod stack;
 mod update;
 
 use config::Config;
 use push::Pusher;
+use stack::Stack;
 use update::CommitUpdater;
 
 #[tokio::main]
@@ -43,36 +43,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    // Find the local HEAD
     let repo = Arc::new(Repository::discover("test").context("failed to open repo")?);
-    let head = repo.head().context("failed to get head")?;
-    let head_commit = head.peel_to_commit().context("failed to get head commit")?;
-    let branch_name = head.shorthand().context("invalid shorthand")?;
-    tracing::debug!(branch_name, ?head_commit, "found HEAD");
-
-    // Find the remote HEAD
-    let default = repo
-        .find_branch(&config.default_upstream, BranchType::Remote)
-        .context("failed to find default branch")?;
-    let default_commit = default
-        .get()
-        .peel_to_commit()
-        .context("failed to get default commit")?;
-    tracing::debug!(?default_commit, "found default HEAD");
-
-    // Calculate the first common ancestor
-    let merge_base = repo
-        .merge_base(default_commit.id(), head_commit.id())
-        .context("failed to locate merge base")?;
-    tracing::debug!(?merge_base, "found merge base");
-
-    // Create an iterator over the stack
-    let mut walk = repo.revwalk().context("failed to create revwalk")?;
-    walk.push(head_commit.id())
-        .context("failed to add commit to revwalk")?;
-    walk.hide(merge_base).context("failed to hide revwalk")?;
-    walk.set_sorting(Sort::REVERSE)
-        .context("failed to set sorting")?;
 
     // Push every commit
     let octocrab = Arc::new(
@@ -93,22 +64,22 @@ async fn main() -> Result<()> {
         .context("failed to connect to repo")?;
     tracing::debug!(connected = conn.connected(), "remote connected");
 
+    let stack = Stack::new(&repo, &config.default_upstream).context("failed to get stack")?;
+
     let pusher = Arc::new(Pusher::new());
 
     let updater = CommitUpdater::new(
         octocrab.clone(),
-        branch_name,
+        stack.name(),
         "master",
         &gh_repo,
         pusher.clone(),
     );
 
-    let futures: Result<FuturesUnordered<_>> = walk
+    let futures: Result<FuturesUnordered<_>> = stack
+        .iter()
         .enumerate()
-        .map(|(i, oid)| {
-            let oid = oid.context("")?;
-            Ok(updater.update(i, repo.borrow(), oid))
-        })
+        .map(|(i, commit)| Ok(updater.update(i, repo.borrow(), commit)))
         .collect();
     let futures = futures.context("failed to generate futures")?;
     let branches = futures.len();
@@ -116,6 +87,7 @@ async fn main() -> Result<()> {
 
     let results = loop {
         tokio::select! {
+            // TODO push gets called twice because its in a loop
             push = pusher.send(branches, conn.remote()) => push.context("failed to push")?,
             r = &mut futures => break r,
         }
