@@ -1,3 +1,5 @@
+use ansi_term::Colour::Yellow;
+use ansi_term::Style;
 use anyhow::{Context, Result};
 use git2::{BranchType, Oid, Repository, Sort};
 
@@ -11,10 +13,15 @@ pub struct Commit {
 pub struct Stack {
     commits: Vec<Commit>,
     name: String,
+    default_upstream: String,
 }
 
 impl Stack {
-    pub fn new(repo: &Repository, default_upstream: &str) -> Result<Self> {
+    pub fn new(
+        repo: &Repository,
+        default_upstream: &str,
+        remote_name: Option<&str>,
+    ) -> Result<Self> {
         // Find the local HEAD
         let head = repo.head().context("failed to get head")?;
         let head_commit = head.peel_to_commit().context("failed to get head commit")?;
@@ -22,9 +29,14 @@ impl Stack {
         tracing::debug!(branch_name, ?head_commit, "found HEAD");
 
         // Find the remote HEAD
+        let (branch_type, branch_prefix) = match remote_name {
+            Some(remote) => (BranchType::Remote, format!("{remote}/")),
+            None => (BranchType::Local, "".to_owned()),
+        };
         let default = repo
-            .find_branch(default_upstream, BranchType::Remote)
+            .find_branch(&format!("{branch_prefix}{default_upstream}"), branch_type)
             .context("failed to find default branch")?;
+
         let default_commit = default
             .get()
             .peel_to_commit()
@@ -59,6 +71,7 @@ impl Stack {
         Ok(Self {
             commits,
             name: branch_name.to_string(),
+            default_upstream: default_upstream.to_string(),
         })
     }
 
@@ -68,5 +81,48 @@ impl Stack {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn upstream(&self) -> &str {
+        &self.default_upstream
+    }
+
+    pub fn len(&self) -> usize {
+        self.commits.len()
+    }
+
+    pub fn render<F>(&self, color: bool, display: F) -> String
+    where
+        F: Fn(&Commit) -> String,
+    {
+        // TODO Thisd colorization stuff feels like it could be done a bit better
+        let structure_style = if color {
+            Yellow.normal()
+        } else {
+            Style::default()
+        };
+
+        let commit_marker = structure_style.paint("*").to_string();
+
+        let mut nodes: Vec<_> = self
+            .commits
+            .iter()
+            .rev()
+            .map(|commit| format!("{commit_marker} {}", display(commit)))
+            .collect();
+
+        nodes.insert(
+            0,
+            structure_style
+                .paint(format!("* {}", self.name))
+                .to_string(),
+        );
+        nodes.push(
+            structure_style
+                .paint(format!("* {}", self.default_upstream))
+                .to_string(),
+        );
+
+        nodes.join("\n")
     }
 }

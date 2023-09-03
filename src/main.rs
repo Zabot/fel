@@ -73,7 +73,12 @@ async fn main() -> Result<()> {
         .context("failed to get remote")?;
 
     let gh_repo = gh::get_repo(&remote).context("failed to get repo")?;
-    let stack = Stack::new(&repo, &config.default_upstream).context("failed to get stack")?;
+    let stack = Stack::new(
+        &repo,
+        &config.default_upstream,
+        Some(&config.default_remote),
+    )
+    .context("failed to get stack")?;
 
     submit::submit(&stack, &mut remote, &gh_repo, octocrab.clone(), &repo)
         .await

@@ -1,6 +1,6 @@
+use ansi_term::Colour::{Green, Yellow};
+use ansi_term::Style;
 use anyhow::{Context, Result};
-use futures::stream::FuturesUnordered;
-use futures::stream::StreamExt;
 use git2::{Remote, Repository};
 use octocrab::Octocrab;
 
@@ -8,7 +8,7 @@ use crate::auth;
 use crate::gh::GHRepo;
 use crate::push::Pusher;
 use crate::stack::Stack;
-use crate::update::CommitUpdater;
+use crate::update::{Action, CommitUpdater};
 
 use std::sync::Arc;
 
@@ -27,34 +27,39 @@ pub async fn submit(
 
     let pusher = Arc::new(Pusher::new());
 
-    let updater = CommitUpdater::new(
-        octocrab.clone(),
-        stack.name(),
-        "master",
-        &gh_repo,
-        pusher.clone(),
+    let updater = CommitUpdater::new(octocrab.clone(), &gh_repo, pusher.clone());
+    let update = updater.update_stack(repo, stack);
+    let send = pusher.send(stack.len(), conn.remote());
+
+    let (actions, _) = futures::try_join!(update, send).context("failed to await tasks")?;
+
+    println!(
+        "{}",
+        stack.render(true, |c| {
+            let Some(action) = actions.get(&c.id) else {
+                return format!("{} unknown", c.id);
+            };
+            let pr = action.pr();
+
+            let url = Style::default()
+                .dimmed()
+                .paint(pr.html_url.as_ref().map(|url| url.as_str()).unwrap_or(""));
+
+            let pr_title = format!(
+                "#{} {} {}",
+                pr.number,
+                pr.title.clone().unwrap_or("".to_string()),
+                url,
+            );
+
+            let status = match action {
+                Action::UpToDate(_) => Green.paint("[up to date]"),
+                Action::UpdatedPR(_) => Yellow.paint("[updated]"),
+                Action::CreatedPR(_) => Yellow.paint("[created]"),
+            };
+            format!("{status} {pr_title}")
+        })
     );
-
-    let futures: Result<FuturesUnordered<_>> = stack
-        .iter()
-        .enumerate()
-        .map(|(i, commit)| Ok(updater.update(i, repo, commit)))
-        .collect();
-    let futures = futures.context("failed to generate futures")?;
-    let branches = futures.len();
-    let mut futures = futures.collect::<Vec<_>>();
-
-    let results = loop {
-        tokio::select! {
-            // TODO push gets called twice because its in a loop
-            push = pusher.send(branches, conn.remote()) => push.context("failed to push")?,
-            r = &mut futures => break r,
-        }
-    };
-
-    for r in results {
-        r.context("failed to update diff")?;
-    }
 
     Ok(())
 }
