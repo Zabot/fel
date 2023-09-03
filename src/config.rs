@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::fs;
+use std::{env, fs, path::PathBuf};
 
 #[derive(serde::Deserialize)]
 pub struct Config {
@@ -10,7 +10,9 @@ pub struct Config {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let contents = fs::read_to_string("fel.toml").context("failed to load config")?;
+        let home = PathBuf::from(env::var("HOME").context("failed to get home dir")?);
+        let config_path = home.join(".config/fel/config.toml");
+        let contents = fs::read_to_string(config_path).context("failed to load config")?;
         Ok(toml::from_str(&contents)?)
     }
 }
