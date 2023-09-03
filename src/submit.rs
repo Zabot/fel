@@ -27,7 +27,7 @@ pub async fn submit(
 
     let pusher = Arc::new(Pusher::new());
 
-    let updater = CommitUpdater::new(octocrab.clone(), &gh_repo, pusher.clone());
+    let updater = CommitUpdater::new(octocrab.clone(), gh_repo, pusher.clone());
     let update = updater.update_stack(repo, stack);
     let send = pusher.send(stack.len(), conn.remote());
 

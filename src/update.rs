@@ -60,7 +60,7 @@ impl CommitUpdater {
         let futures: Result<FuturesOrdered<_>> = stack
             .iter()
             .enumerate()
-            .map(|(i, commit)| Ok(self.update_commit(i, repo, commit, &stack, &barrier)))
+            .map(|(i, commit)| Ok(self.update_commit(i, repo, commit, stack, &barrier)))
             .collect();
         let futures = futures.context("failed to generate futures")?;
         let futures = futures.collect::<Vec<_>>();
