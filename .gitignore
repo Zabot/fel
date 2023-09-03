@@ -1,7 +1,4 @@
 .direnv
 target/
-
 result
 result-bin
-
-fel.toml
