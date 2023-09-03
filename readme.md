@@ -1,55 +1,53 @@
 # Fel
-Fel is a tool for submitting [stacked diffs](https://medium.com/@kurtisnusbaum/stacked-diffs-keeping-phabricator-diffs-small-d9964f4dcfa6)
-to GitHub. Fel takes care of all the busy work of submitting multiple commits as
-a stack of PRs and lets you focus on keeping your diffs reviewable and lets reviewers
-focus on understanding your code. When your stack is ready to land, Fel handles merging
-all your PRs through GitHub, producing a commit history that looks like you rebased
-the whole stack at once, without polluting your history with extra merge commits,
-or requiring the upstream project to use an external tool to land diffs to master.
+Fel submits each commit in a branch as a separate PR against a remote repo. Fel is designed
+to be a companion to the conventional git tooling. Rather than needing to create and manage
+stacks as first class objects, Fel infers the shape of a stack. You can continue to manipulate
+your repo with `git` without needing to keep fel in sync as you make changes. Fel also does not
+try and handle merging stacks, meaning it can be used without any support needed from the repo
+the stack is submitted to.
 
-# Demo
-![Fel Demo GIF](https://raw.githubusercontent.com/Zabot/fel/master/.images/demo.gif)
+## Usage
+Create a new branch to represent your stack. The name of the branch
+will be used as the name of the stack. Make commits to your branch,
+each commit will be translated into a single PR. Amend commits as needed
+with this in mind. Upload your branch to GitHub with `fel submit`. Fel will
+automatically push a branch for every commit in your stack and create PRs with
+properly configured base branches, so each commit appears as a single diff.
 
-Fel even generates graphs for your PRs to indicate all of the diffs in your stack
-and how they relate.
+If you amend any of your commits, run `fel submit` again from the top of the stack.
+Fel will force push the branches corresponding to each PR and post a message in each
+thread with a diff between the newly submitted commit and the last commit.
 
-> This diff is part of a [fel stack](https://github.com/zabot/fel)
-> <pre>
-> * <a href="75">#75 Bugfixes in file 4</a>
-> * <a href="74">#74 Added file4</a>
-> | * <a href="73">#73 New line in third file</a>
-> |/  
-> * <a href="72">#72 Third new file</a>
-> * <a href="71">#71 Line 1 in new file</a>
-> * master
-> </pre>
+Once your PRs are ready to merge, merge them as normal using the GitHub UI and rebase your
+stack on top of the newly merged commit. Fel does not have an opinion on how stacks are
+landed, only how they're created.
 
-
-# Usage
-Fel requires a GitHub oauth token to create and merge PRs on your behalf. Generate
-one [here](https://github.com/settings/tokens). Once you have your token, add it
-to the Fel configuration file (default `~/.fel.yml`).
-
-```yaml
-gh_token: <your_token_here>
+### Git config
+Fel uses [git notes](https://git-scm.com/docs/git-notes) to track the metadata associated
+with each commit. In order for fel to track commits across rebases and amends, you must
+ensure that `notes.rewriteRef` includes `refs/notes/fel`. This config ensures that git
+will persist the fel metadata when modifying commits with attached notes.
+```ini
+[notes]
+	rewriteRef = "refs/notes/fel"
 ```
 
-Now create a new branch and start writing some diffs. Working with stacked diffs
-requires a different way of thinking, think of each commit as an atomic unit of
-change. Commit early into the development of each diff and amend often. Leave 
-detailed commit bodies, they'll become the contents of your PRs when you submit
-your stack for review.
+## Config
+Fel reads from a config file in `~/.config/fel/config.toml`
 
-Once your stack is ready, run `fel submit`. Fel will generate a PR for each commit
-in the stack, basing the first PR against `origin/master`, and then each subsequent
-PR against the previous PR in the stack. If multiple stacks overlap, Fel will
-create a single PR for the common diffs, and base the diverging diffs on the common
-base.
+```toml
+token = "<github pat>" # The token used to create and modify PRs
+default_remote = "origin" # The remote to push branches too and make PRs against
+default_upstream = "master" # The branch of the remote to make PRs against
+```
 
-When your diffs are reviewed and ready to land, checkout the top of your stack
-and run `fel land`. Fel will merge the PRs on GitHub in order by rebasing onto
-the base branch, without creating the ladder of merge commits associated
-with a manual stacked PR workflow. After your commits are landed, fel cleans up
-the branches it generated and leaves you on a fresh checkout of the upstream branch,
-with all of your diffs landed.
+## TODO
+- Properly check `XDG_CONFIG_DIRS` for config file
+- Optionally make commit messages authoritative and overwrite pr body on every submit
+- Status command to view PR status
+- Include stack name and index in PR title
+
+## What happened to the old version
+Fel was previously a python script. It was getting untenable to maintain, and I've since learned rust. So I rewrote it in rust
+The legacy python version is available [here](https://github.com/Zabot/fel/releases/tag/legacy-python)
 
