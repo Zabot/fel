@@ -1,7 +1,12 @@
 [package]
 name = "fel"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2021"
+authors = ["Zach Anderson <zach@zabot.dev>"]
+description = "A tool for transparently submitting stacked diffs to GitHub from git branches"
+readme = "readme.md"
+repository = "https://github.com/zabot/fel/"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 anyhow = "1.0.75"
