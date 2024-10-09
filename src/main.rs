@@ -20,7 +20,7 @@ use stack::Stack;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    #[arg(short = 'C', value_name = "path")]
+    #[arg(short = 'C', value_name = "path", default_value = ".")]
     path: PathBuf,
 
     #[command(subcommand)]
