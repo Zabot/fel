@@ -2,6 +2,7 @@ use ansi_term::Colour::{Green, Yellow};
 use ansi_term::Style;
 use anyhow::{Context, Result};
 use git2::{Remote, Repository};
+use indicatif::ProgressBar;
 use octocrab::Octocrab;
 
 use crate::auth;
@@ -11,6 +12,7 @@ use crate::stack::Stack;
 use crate::update::{Action, CommitUpdater};
 
 use std::sync::Arc;
+use std::time::Duration;
 
 pub async fn submit(
     stack: &Stack,
@@ -19,20 +21,33 @@ pub async fn submit(
     octocrab: Arc<Octocrab>,
     repo: &Repository,
 ) -> Result<()> {
-    tracing::debug!(remote = remote.name(), "connecting to remote");
+    let spinner = ProgressBar::new_spinner();
+    spinner.enable_steady_tick(Duration::from_millis(100));
+
+    let remote_name = remote.name().unwrap_or("unnamed remote").to_string();
+    tracing::debug!(remote_name, "connecting to remote");
+    spinner.set_message(format!("Connecting to {remote_name}...",));
+
     let mut conn = remote
         .connect_auth(git2::Direction::Push, Some(auth::callbacks()), None)
         .context("failed to connect to repo")?;
+
     tracing::debug!(connected = conn.connected(), "remote connected");
+    spinner.println(format!("Connected to {remote_name}",));
 
     let pusher = Arc::new(Pusher::new());
 
+    spinner.set_message(format!("Updating stack..."));
     let updater = CommitUpdater::new(octocrab.clone(), gh_repo, pusher.clone());
     let update = updater.update_stack(repo, stack);
     let send = pusher.send(stack.len(), conn.remote());
+    spinner.println("Updated stack");
 
+    spinner.set_message(format!("Updating PRs..."));
     let (actions, _) = futures::try_join!(update, send).context("failed to await tasks")?;
+    spinner.println("Updated PRs");
 
+    spinner.finish_and_clear();
     println!(
         "{}",
         stack.render(true, |c| {
