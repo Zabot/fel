@@ -93,10 +93,16 @@ impl CommitUpdater {
         let (branch, already_exists) = match &c.metadata.branch {
             Some(branch) => (branch.clone(), true),
             None => {
-                let branch_name = match config.branch_prefix.as_ref() {
-                    Some(prefix) => format!("{prefix}/fel/{}/{index}", stack.name()),
-                    None => format!("fel/{}/{index}", stack.name()),
+                let branch_name = match config.use_indexed_branches {
+                    true => format!("fel/{}/{index}", stack.name()),
+                    false => format!("fel/{}/{}", stack.name(), &c.id.to_string()[..4]),
                 };
+
+                let branch_name = match config.branch_prefix.as_ref() {
+                    Some(prefix) => format!("{prefix}/{branch_name}"),
+                    None => branch_name,
+                };
+
                 (branch_name, false)
             }
         };

@@ -7,6 +7,7 @@ pub struct Config {
     pub default_remote: String,
     pub default_upstream: String,
     pub branch_prefix: Option<String>,
+    pub use_indexed_branches: bool,
 }
 
 impl Config {
