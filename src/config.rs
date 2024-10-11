@@ -8,6 +8,7 @@ pub struct Config {
     pub default_upstream: String,
     pub branch_prefix: Option<String>,
     pub use_indexed_branches: bool,
+    pub auto_create_branches: bool,
 }
 
 impl Config {

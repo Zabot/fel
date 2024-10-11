@@ -3,7 +3,7 @@ use ansi_term::Style;
 use anyhow::{Context, Result};
 use git2::{BranchType, Oid, Repository, Sort};
 
-use crate::metadata::Metadata;
+use crate::{config::Config, metadata::Metadata};
 
 pub struct Commit {
     pub id: Oid,
@@ -17,24 +17,28 @@ pub struct Stack {
 }
 
 impl Stack {
-    pub fn new(
-        repo: &Repository,
-        default_upstream: &str,
-        remote_name: Option<&str>,
-    ) -> Result<Self> {
+    pub fn new(repo: &Repository, config: &Config) -> Result<Self> {
         // Find the local HEAD
         let head = repo.head().context("failed to get head")?;
         let head_commit = head.peel_to_commit().context("failed to get head commit")?;
-        let branch_name = head.shorthand().context("invalid shorthand")?;
+        let mut branch_name = head.shorthand().context("invalid shorthand")?.to_string();
+
+        // If there current HEAD is not a branch, create one and switch to it
+        if config.auto_create_branches && &branch_name == "HEAD" {
+            branch_name = format!("dev-{}", &head_commit.id().to_string()[..4]);
+            let branch = repo.branch(&branch_name, &head_commit, false)?;
+            let branch = branch.into_reference();
+            let refname = branch.name().context("branch name not utf-8")?;
+            repo.set_head(refname)?;
+        }
         tracing::debug!(branch_name, ?head_commit, "found HEAD");
 
         // Find the remote HEAD
-        let (branch_type, branch_prefix) = match remote_name {
-            Some(remote) => (BranchType::Remote, format!("{remote}/")),
-            None => (BranchType::Local, "".to_owned()),
-        };
         let default = repo
-            .find_branch(&format!("{branch_prefix}{default_upstream}"), branch_type)
+            .find_branch(
+                &format!("{}/{}", config.default_remote, config.default_upstream),
+                BranchType::Remote,
+            )
             .context("failed to find default branch")?;
 
         let default_commit = default
@@ -70,8 +74,8 @@ impl Stack {
 
         Ok(Self {
             commits,
-            name: branch_name.to_string(),
-            default_upstream: default_upstream.to_string(),
+            name: branch_name,
+            default_upstream: config.default_upstream.clone(),
         })
     }
 

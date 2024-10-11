@@ -75,8 +75,7 @@ async fn main() -> Result<()> {
     let gh_repo = gh::get_repo(&remote).context("failed to get repo")?;
     let stack = Stack::new(
         &repo,
-        &config.default_upstream,
-        Some(&config.default_remote),
+        &config,
     )
     .context("failed to get stack")?;
 
