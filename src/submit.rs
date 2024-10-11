@@ -6,6 +6,7 @@ use indicatif::ProgressBar;
 use octocrab::Octocrab;
 
 use crate::auth;
+use crate::config::Config;
 use crate::gh::GHRepo;
 use crate::push::Pusher;
 use crate::stack::Stack;
@@ -20,6 +21,7 @@ pub async fn submit(
     gh_repo: &GHRepo,
     octocrab: Arc<Octocrab>,
     repo: &Repository,
+    config: &Config,
 ) -> Result<()> {
     let spinner = ProgressBar::new_spinner();
     spinner.enable_steady_tick(Duration::from_millis(100));
@@ -39,7 +41,7 @@ pub async fn submit(
 
     spinner.set_message(format!("Updating stack..."));
     let updater = CommitUpdater::new(octocrab.clone(), gh_repo, pusher.clone());
-    let update = updater.update_stack(repo, stack);
+    let update = updater.update_stack(repo, stack, config);
     let send = pusher.send(stack.len(), conn.remote());
     spinner.println("Updated stack");
 

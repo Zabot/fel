@@ -6,6 +6,7 @@ pub struct Config {
     pub token: String,
     pub default_remote: String,
     pub default_upstream: String,
+    pub branch_prefix: Option<String>,
 }
 
 impl Config {

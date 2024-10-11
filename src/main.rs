@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
     )
     .context("failed to get stack")?;
 
-    submit::submit(&stack, &mut remote, &gh_repo, octocrab.clone(), &repo)
+    submit::submit(&stack, &mut remote, &gh_repo, octocrab.clone(), &repo, &config)
         .await
         .context("failed to submit")?;
 

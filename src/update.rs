@@ -8,6 +8,7 @@ use parking_lot::RwLock;
 use tokio::sync::Barrier;
 
 use crate::{
+    config::Config,
     gh::GHRepo,
     metadata::Metadata,
     push::Pusher,
@@ -54,13 +55,14 @@ impl CommitUpdater {
         &self,
         repo: &Repository,
         stack: &Stack,
+        config: &Config,
     ) -> Result<HashMap<Oid, Action>> {
         let barrier = Barrier::new(stack.len());
 
         let futures: Result<FuturesOrdered<_>> = stack
             .iter()
             .enumerate()
-            .map(|(i, commit)| Ok(self.update_commit(i, repo, commit, stack, &barrier)))
+            .map(|(i, commit)| Ok(self.update_commit(i, repo, commit, stack, &barrier, config)))
             .collect();
         let futures = futures.context("failed to generate futures")?;
         let futures = futures.collect::<Vec<_>>();
@@ -80,6 +82,7 @@ impl CommitUpdater {
         c: &Commit,
         stack: &Stack,
         barrier: &Barrier,
+        config: &Config,
     ) -> Result<Action> {
         let commit = repo.find_commit(c.id).context("failed to get commit")?;
         anyhow::ensure!(
@@ -87,13 +90,19 @@ impl CommitUpdater {
             "fel stacks cannot contain merge commits"
         );
 
-        let (branch, force) = match &c.metadata.branch {
+        let (branch, already_exists) = match &c.metadata.branch {
             Some(branch) => (branch.clone(), true),
-            None => (format!("fel/{}/{}", stack.name(), index), false),
+            None => {
+                let branch_name = match config.branch_prefix.as_ref() {
+                    Some(prefix) => format!("{prefix}/fel/{}/{index}", stack.name()),
+                    None => format!("fel/{}/{index}", stack.name()),
+                };
+                (branch_name, false)
+            }
         };
         let branch = self
             .pusher
-            .push(commit.id(), branch, force)
+            .push(commit.id(), branch, already_exists)
             .await
             .context("failed to push branch")?;
 
