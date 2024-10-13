@@ -16,21 +16,19 @@
       rustPkgs = pkgs.rustBuilder.makePackageSet {
         rustVersion = "1.70.0";
         packageFun = import ./Cargo.nix;
-        extraRustComponents = [
-          "clippy"
-          "rustfmt"
-        ];
+        extraRustComponents = [ "clippy" "rustfmt" ];
       };
-    in
-    {
-      packages.x86_64-linux = rec {
-        fel = (rustPkgs.workspace.fel { });
+    in {
+      packages.x86_64-linux = let fel = (rustPkgs.workspace.fel { });
+      in {
+        inherit fel;
+        default = fel;
       };
 
       devShells."x86_64-linux".default = (rustPkgs.workspaceShell {
         nativeBuildInputs = [
           cargo2nix.packages.x86_64-linux.default
-          pkgs.go-containerregistry
+          pkgs.nixfmt
 
           # Native dependencies for git2
           pkgs.pkg-config

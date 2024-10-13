@@ -3,20 +3,21 @@ use git2::{Commit, Oid, Repository};
 
 pub const NOTE_REF: &str = "refs/notes/fel";
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Default, Clone)]
 pub struct Metadata {
     pub branch: Option<String>,
     pub pr: Option<u64>,
     pub revision: Option<u32>,
     pub commit: Option<String>,
     pub history: Option<Vec<String>>,
+    pub pr_url: Option<String>,
 }
 
 impl Metadata {
-    pub fn new(repo: &Repository, commit: Oid) -> Result<Self> {
+    pub fn new(repo: &Repository, commit: &Commit) -> Result<Self> {
         tracing::debug!(?commit, "walking tree");
 
-        let note = repo.find_note(Some(NOTE_REF), commit);
+        let note = repo.find_note(Some(NOTE_REF), commit.id());
 
         // check if this commit has a note already
         let metadata = match note {
@@ -36,11 +37,11 @@ impl Metadata {
         Ok(metadata)
     }
 
-    pub fn write(&self, repo: &Repository, commit: &Commit) -> Result<()> {
+    pub fn write(&self, repo: &Repository, commit: Oid) -> Result<()> {
         let metadata = toml::to_string_pretty(&self).context("failed to serialize metadata")?;
         let sig = repo.signature().context("failed to get signature")?;
         tracing::debug!(metadata, ?commit, "writing note");
-        repo.note(&sig, &sig, Some(NOTE_REF), commit.id(), &metadata, true)
+        repo.note(&sig, &sig, Some(NOTE_REF), commit, &metadata, true)
             .context("failed to create note")?;
         Ok(())
     }

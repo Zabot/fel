@@ -1,0 +1,14 @@
+<div id="fel">
+<hr>
+
+<pre>
+* {{ stack_name }}
+{% for pr in prs -%}
+* <a href="{{pr.number}}">#{{pr.number}} {{pr.title}}</a>
+{% endfor -%}
+* {{ upstream }}
+</pre>
+
+This diff is part of a <a href=https://github.com/zabot/fel>fel stack</a>.
+
+</div>

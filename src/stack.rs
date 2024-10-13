@@ -1,14 +1,7 @@
-use ansi_term::Colour::Yellow;
-use ansi_term::Style;
 use anyhow::{Context, Result};
-use git2::{BranchType, Oid, Repository, Sort};
+use git2::{BranchType, Repository, Sort};
 
-use crate::{config::Config, metadata::Metadata};
-
-pub struct Commit {
-    pub id: Oid,
-    pub metadata: Metadata,
-}
+use crate::{commit::Commit, config::Config};
 
 pub struct Stack {
     commits: Vec<Commit>,
@@ -21,16 +14,7 @@ impl Stack {
         // Find the local HEAD
         let head = repo.head().context("failed to get head")?;
         let head_commit = head.peel_to_commit().context("failed to get head commit")?;
-        let mut branch_name = head.shorthand().context("invalid shorthand")?.to_string();
-
-        // If there current HEAD is not a branch, create one and switch to it
-        if config.auto_create_branches && &branch_name == "HEAD" {
-            branch_name = format!("dev-{}", &head_commit.id().to_string()[..4]);
-            let branch = repo.branch(&branch_name, &head_commit, false)?;
-            let branch = branch.into_reference();
-            let refname = branch.name().context("branch name not utf-8")?;
-            repo.set_head(refname)?;
-        }
+        let branch_name = head.shorthand().context("invalid shorthand")?.to_string();
         tracing::debug!(branch_name, ?head_commit, "found HEAD");
 
         // Find the remote HEAD
@@ -64,10 +48,8 @@ impl Stack {
         let commits: Vec<_> = walk
             .map(|oid| {
                 let id = oid.context("failed to walk oid")?;
-                Ok(Commit {
-                    id,
-                    metadata: Metadata::new(repo, id).context("failed to get metadata")?,
-                })
+                let commit = repo.find_commit(id).context("failed to find commit")?;
+                Commit::new(commit, repo)
             })
             .collect::<Result<_>>()
             .context("failed to get commits in stack")?;
@@ -77,6 +59,26 @@ impl Stack {
             name: branch_name,
             default_upstream: config.default_upstream.clone(),
         })
+    }
+
+    /// Returns true if this stack does not have a branch associated with it
+    pub fn is_detached(&self) -> bool {
+        self.name == "HEAD"
+    }
+
+    /// Create a new branch with the same head as this stack
+    pub fn dev_branch(&mut self, repo: &Repository) -> Result<()> {
+        let head_commit = self.commits.first().context("no commits")?;
+        let head_commit = repo
+            .find_commit(head_commit.id())
+            .context("find head commit")?;
+        self.name = format!("dev-{}", &head_commit.id().to_string()[..4]);
+        let branch = repo.branch(&self.name, &head_commit, false)?;
+        let branch = branch.into_reference();
+        let refname = branch.name().context("branch name not utf-8")?;
+        repo.set_head(refname)?;
+
+        Ok(())
     }
 
     pub fn iter(&self) -> std::slice::Iter<Commit> {
@@ -93,40 +95,5 @@ impl Stack {
 
     pub fn len(&self) -> usize {
         self.commits.len()
-    }
-
-    pub fn render<F>(&self, color: bool, display: F) -> String
-    where
-        F: Fn(&Commit) -> String,
-    {
-        // TODO Thisd colorization stuff feels like it could be done a bit better
-        let structure_style = if color {
-            Yellow.normal()
-        } else {
-            Style::default()
-        };
-
-        let commit_marker = structure_style.paint("*").to_string();
-
-        let mut nodes: Vec<_> = self
-            .commits
-            .iter()
-            .rev()
-            .map(|commit| format!("{commit_marker} {}", display(commit)))
-            .collect();
-
-        nodes.insert(
-            0,
-            structure_style
-                .paint(format!("* {}", self.name))
-                .to_string(),
-        );
-        nodes.push(
-            structure_style
-                .paint(format!("* {}", self.default_upstream))
-                .to_string(),
-        );
-
-        nodes.join("\n")
     }
 }

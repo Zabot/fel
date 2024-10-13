@@ -8,9 +8,21 @@ use git2::PushOptions;
 use git2::Remote;
 use git2::RemoteCallbacks;
 use parking_lot::Mutex;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::oneshot;
+use tokio::sync::Notify;
 
-type PushResult = Result<String, PushError>;
+type PushResult = Result<(), PushError>;
+
+struct PendingPush {
+    refspec: Refspec,
+    info: oneshot::Sender<PushResult>,
+}
+
+#[derive(Default)]
+pub struct BatchedPusher {
+    pending: Mutex<Vec<PendingPush>>,
+    new_task: Notify,
+}
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum PushError {
@@ -55,72 +67,42 @@ impl Refspec {
     }
 }
 
-pub struct Pusher {
-    targets: Mutex<HashMap<Oid, watch::Sender<Option<PushResult>>>>,
-    refspecs_tx: mpsc::Sender<Refspec>,
-    refspecs: tokio::sync::Mutex<mpsc::Receiver<Refspec>>,
-}
-
-impl Pusher {
-    pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel(16);
-        Self {
-            targets: Mutex::new(HashMap::new()),
-            refspecs_tx: tx,
-            refspecs: tokio::sync::Mutex::new(rx),
-        }
-    }
-
-    pub async fn push(&self, commit: Oid, branch: String, force: bool) -> PushResult {
-        let refspec = Refspec::new(commit, branch, force);
-
-        self.targets.lock().entry(commit).or_insert_with(|| {
-            let (tx, _) = watch::channel(None);
-            tx
+impl BatchedPusher {
+    pub async fn push(&self, commit: Oid, branch: String, force: bool) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        tracing::debug!("waiting for pending lock");
+        self.pending.lock().push(PendingPush {
+            refspec: Refspec::new(commit, branch, force),
+            info: tx,
         });
-
-        self.refspecs_tx.send(refspec).await.ok();
-        self.wait(commit).await
+        tracing::debug!("pushed to list");
+        self.new_task.notify_waiters();
+        let result = rx.await.context("recv push result")?;
+        Ok(result?)
     }
 
-    pub async fn wait(&self, commit: Oid) -> PushResult {
-        let mut rx = self
-            .targets
-            .lock()
-            .entry(commit)
-            .or_insert_with(|| {
-                let (tx, _) = watch::channel(None);
-                tx
-            })
-            .subscribe();
-
-        let branch = rx
-            .wait_for(|branch| branch.is_some())
-            .await
-            .expect("channel was closed")
-            .clone();
-
-        branch.expect("branch was just asserted not none")
-    }
-
-    pub async fn send(&self, batch: usize, remote: &mut Remote<'_>) -> Result<()> {
-        let mut branches = HashMap::new();
-        let refspecs = {
-            tracing::debug!("waiting for refspecs");
-            let mut lock_guard = self.refspecs.lock().await;
-
-            let mut refspecs = Vec::with_capacity(batch);
-            for _ in 0..batch {
-                let Some(refspec) = lock_guard.recv().await else {
-                    break
-                };
-                let refname = refspec.refname();
-                refspecs.push(refspec.to_string());
-                branches.insert(refname, refspec);
+    pub async fn wait_for(&self, count: usize, remote: &mut Remote<'_>) -> Result<()> {
+        tracing::debug!("waiting for pending pushes");
+        let pending = loop {
+            {
+                let mut pending_guard = self.pending.lock();
+                tracing::debug!(count = pending_guard.len(), "waiting...");
+                if pending_guard.len() >= count {
+                    let old: Vec<PendingPush> = std::mem::take(pending_guard.as_mut());
+                    break old;
+                }
             }
 
-            refspecs
+            self.new_task.notified().await;
         };
+
+        tracing::debug!("beginning push");
+        let mut refspecs = Vec::with_capacity(pending.len());
+        let mut info = HashMap::with_capacity(pending.len());
+        for push in pending.into_iter() {
+            refspecs.push(push.refspec.to_string());
+            info.insert(push.refspec.refname(), push.info);
+        }
 
         let mut callbacks = RemoteCallbacks::default();
         callbacks
@@ -149,14 +131,7 @@ impl Pusher {
             .push_update_reference(|branch, status| {
                 tracing::trace!(branch, ?status, "update reference");
 
-                let Some(refspec) = branches.get(branch) else {
-                    // Got update for branch we didn't request
-                    tracing::warn!(branch, "unsolicited update to branch");
-                    return Ok(());
-                };
-
-                let targets = self.targets.lock();
-                let Some(sender) = targets.get(&refspec.commit) else {
+                let Some(sender) = info.remove(branch) else {
                     // Got update for branch we didn't push
                     tracing::warn!(branch, "unsolicited update to branch");
                     return Ok(());
@@ -164,8 +139,8 @@ impl Pusher {
 
                 let result = status
                     .map(|error| Err(PushError::Rejected(error.to_string())))
-                    .unwrap_or(Ok(refspec.branch.clone()));
-                sender.send_replace(Some(result));
+                    .unwrap_or(Ok(()));
+                sender.send(result).ok();
 
                 Ok(())
             });

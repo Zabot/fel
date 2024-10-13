@@ -6,13 +6,13 @@ use clap::{Parser, Subcommand};
 use git2::Repository;
 
 mod auth;
+mod commit;
 mod config;
 mod gh;
 mod metadata;
 mod push;
 mod stack;
 mod submit;
-mod update;
 
 use config::Config;
 use stack::Stack;
@@ -61,7 +61,8 @@ async fn main() -> Result<()> {
 
     let repo = Repository::discover(&cli.path).context("failed to open repo")?;
 
-    // Push every commit
+    let mut stack = Stack::new(&repo, &config).context("failed to get stack")?;
+
     let octocrab = Arc::new(
         octocrab::OctocrabBuilder::default()
             .personal_token(config.token.clone())
@@ -73,15 +74,27 @@ async fn main() -> Result<()> {
         .context("failed to get remote")?;
 
     let gh_repo = gh::get_repo(&remote).context("failed to get repo")?;
-    let stack = Stack::new(
-        &repo,
-        &config,
-    )
-    .context("failed to get stack")?;
 
-    submit::submit(&stack, &mut remote, &gh_repo, octocrab.clone(), &repo, &config)
-        .await
-        .context("failed to submit")?;
+    match cli.command {
+        Commands::Submit => {
+            if config.submit.auto_create_branches && stack.is_detached() {
+                stack
+                    .dev_branch(&repo)
+                    .context("failed to create dev branch")?;
+            }
 
+            // Push every commit
+            submit::submit(
+                &stack,
+                &mut remote,
+                octocrab.clone(),
+                &gh_repo,
+                &repo,
+                &config,
+            )
+            .await
+            .context("failed to submit")?;
+        }
+    }
     Ok(())
 }
