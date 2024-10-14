@@ -13,6 +13,7 @@ mod gh;
 mod metadata;
 mod progress_tracing;
 mod push;
+mod render;
 mod stack;
 mod submit;
 
@@ -93,7 +94,7 @@ async fn main() -> Result<()> {
 
             // Push every commit
             submit::submit(
-                &stack,
+                stack,
                 &mut remote,
                 octocrab.clone(),
                 &gh_repo,

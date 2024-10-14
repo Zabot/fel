@@ -7,7 +7,6 @@ use indicatif::{MultiProgress, ProgressBar, ProgressFinish, ProgressStyle};
 use octocrab::pulls::PullRequestHandler;
 use octocrab::Octocrab;
 use parking_lot::RwLock;
-use tera::Tera;
 use tokio::sync::{watch, Notify};
 
 use crate::auth;
@@ -16,6 +15,7 @@ use crate::config::Config;
 use crate::gh::GHRepo;
 use crate::metadata::Metadata;
 use crate::push::BatchedPusher;
+use crate::render::{RenderInfo, RenderStore, TeraRender};
 use crate::stack::Stack;
 
 use std::borrow::Cow;
@@ -25,27 +25,21 @@ use std::time::Duration;
 
 const BODY_DELIM: &str = "[#]:fel";
 
-#[derive(serde::Serialize, Clone)]
-struct PrInfo {
-    number: u64,
-    title: String,
-}
-
 struct Submit {
     octocrab: Arc<Octocrab>,
     gh_repo: GHRepo,
 
     use_indexed_branches: bool,
     branch_prefix: Option<String>,
-    stack_name: String,
-    stack_upstream: String,
     authoritative_commits: bool,
 
+    stack: Stack,
+
     pusher: BatchedPusher,
-    footer_rx: watch::Receiver<Option<String>>,
 
     branch_names: RwLock<HashMap<git2::Oid, watch::Receiver<Option<String>>>>,
-    pr_info: RwLock<HashMap<git2::Oid, watch::Receiver<Option<PrInfo>>>>,
+
+    render_store: Arc<RenderStore<TeraRender>>,
 }
 
 struct SubmitProgress {
@@ -128,15 +122,18 @@ impl Submit {
         index: usize,
         progress: &mut SubmitProgress,
         branch_name_tx: watch::Sender<Option<String>>,
-        pr_info_tx: watch::Sender<Option<PrInfo>>,
     ) -> Result<(Oid, Metadata)> {
         // Figure out the branch name
         let force_push = commit.metadata.branch.is_some();
         let branch_name = commit.metadata.branch.clone().unwrap_or_else(|| {
             let branch_name = match self.use_indexed_branches {
-                true => format!("fel/{}/{index}", &self.stack_name),
+                true => format!("fel/{}/{index}", &self.stack.name()),
                 false => {
-                    format!("fel/{}/{}", &self.stack_name, &commit.id().to_string()[..4])
+                    format!(
+                        "fel/{}/{}",
+                        &self.stack.name(),
+                        &commit.id().to_string()[..4]
+                    )
                 }
             };
 
@@ -157,7 +154,7 @@ impl Submit {
 
         // Now we need to figure out the branch name of the parent
         let base_branch = if index == 0 {
-            self.stack_upstream.clone()
+            self.stack.upstream().to_string()
         } else {
             // TODO We may need to make sure that the parent branch was actually
             // finished pushing before we proceed here. Even if the branch name
@@ -188,15 +185,10 @@ impl Submit {
                 progress.set_message(format!("updating PR {pr}"));
                 created_pr = false;
 
-                // TODO It would be great to dry this out
                 let footer = self
-                    .footer_rx
-                    .clone()
-                    .wait_for(|footer| footer.is_some())
-                    .await
-                    .context("wait for footer")?
-                    .clone()
-                    .context("footer was none")?;
+                    .render_store
+                    .render_stack(commit.id(), &self.stack)
+                    .await?;
 
                 self.pulls()
                     .update(pr)
@@ -232,10 +224,14 @@ impl Submit {
         progress.pr_title = pr.title.clone();
         progress.pr_url = pr.html_url.as_ref().map(|url| url.to_string());
         progress.update()?;
-        pr_info_tx.send_replace(Some(PrInfo {
-            number: pr.number,
-            title: pr.title.unwrap_or_default(),
-        }));
+        self.render_store.record(
+            commit.id(),
+            RenderInfo {
+                number: pr.number,
+                title: pr.title.unwrap_or_default(),
+                commit: commit.id().to_string(),
+            },
+        );
 
         // If the commit messages are authoritative we don't need to do this second update step
         // (unless we had to create the PR in the first place) because we already wrote the
@@ -245,13 +241,9 @@ impl Submit {
             // we created all the prs, so now we need to update the prs with the footer
             // We also may need to update the base branch to restack the prs
             let footer = self
-                .footer_rx
-                .clone()
-                .wait_for(|footer| footer.is_some())
-                .await
-                .context("wait for footer")?
-                .clone()
-                .context("footer was none")?;
+                .render_store
+                .render_stack(commit.id(), &self.stack)
+                .await?;
 
             let original_body = pr.body.clone().unwrap_or_default();
             let original_body = original_body.split(BODY_DELIM).next().unwrap_or_default();
@@ -292,16 +284,12 @@ impl Submit {
         Ok::<_, anyhow::Error>((commit.id(), metadata))
     }
 
-    fn new(
-        stack: &Stack,
-        octocrab: Arc<Octocrab>,
-        gh_repo: &GHRepo,
-        config: &Config,
-        footer_rx: watch::Receiver<Option<String>>,
-    ) -> Self {
+    fn new(stack: Stack, octocrab: Arc<Octocrab>, gh_repo: &GHRepo, config: &Config) -> Self {
         let pusher = BatchedPusher::default();
         let branch_names = RwLock::new(HashMap::new());
-        let pr_info = RwLock::new(HashMap::new());
+
+        let render = TeraRender::new().unwrap();
+        let render_store = Arc::new(RenderStore::new(render));
 
         Self {
             pusher,
@@ -309,58 +297,16 @@ impl Submit {
             branch_prefix: config.submit.branch_prefix.clone(),
             octocrab,
             gh_repo: gh_repo.clone(),
-            stack_name: stack.name().to_string(),
-            stack_upstream: stack.upstream().to_string(),
             authoritative_commits: config.submit.authoritative_commits,
             branch_names,
-            pr_info,
-            footer_rx,
+            render_store,
+            stack,
         }
-    }
-
-    async fn render_footer(
-        &self,
-        commits: Vec<Oid>,
-        footer_tx: watch::Sender<Option<String>>,
-    ) -> Result<()> {
-        let mut prs = Vec::new();
-        for id in commits {
-            let mut info = self
-                .pr_info
-                .read()
-                .get(&id)
-                .with_context(|| format!("missing commit: {id}"))?
-                .clone();
-
-            prs.insert(
-                0,
-                info.wait_for(|pr| pr.is_some())
-                    .await
-                    .context("await pr info")?
-                    .clone()
-                    .context("info is none")?,
-            );
-        }
-
-        // TODO This is totally overkill
-        let mut tera = Tera::default();
-        tera.add_raw_template("footer.html", include_str!("../templates/footer.html"))?;
-        let mut context = tera::Context::new();
-        context.insert("prs", &prs);
-        context.insert("stack_name", &self.stack_name);
-        context.insert("upstream", &self.stack_upstream);
-        let footer = tera
-            .render("footer.html", &context)
-            .context("render footer")?;
-        tracing::debug!(footer, "rendered footer");
-
-        footer_tx.send_replace(Some(footer));
-        Ok::<_, anyhow::Error>(())
     }
 }
 
 pub async fn submit(
-    stack: &Stack,
+    stack: Stack,
     remote: &mut Remote<'_>,
     octocrab: Arc<Octocrab>,
     gh_repo: &GHRepo,
@@ -368,13 +314,12 @@ pub async fn submit(
     config: &Config,
     progress: &MultiProgress,
 ) -> Result<()> {
-    let (footer_tx, footer_rx) = watch::channel(None);
-
-    let submit = Arc::new(Submit::new(stack, octocrab, gh_repo, config, footer_rx));
+    let submit = Arc::new(Submit::new(stack, octocrab, gh_repo, config));
 
     let notify = Arc::new(Notify::new());
 
-    let tasks: FuturesUnordered<_> = stack
+    let tasks: FuturesUnordered<_> = submit
+        .stack
         .iter()
         .cloned()
         .enumerate()
@@ -385,19 +330,20 @@ pub async fn submit(
                 .write()
                 .insert(commit.id(), branch_name_rx);
 
-            // We may be able to avoid waiting for anything if the commit messages are authoritative
-            let (pr_info_tx, pr_info_rx) = watch::channel(
-                submit
-                    .authoritative_commits
-                    .then(|| {
-                        commit.metadata.pr.map(|pr| PrInfo {
+            // If commit messages are authoritative we don't need to wait for GH to tell us
+            // information about the commit
+            if submit.authoritative_commits {
+                if let Some(pr) = commit.metadata.pr {
+                    submit.render_store.record(
+                        commit.id(),
+                        RenderInfo {
                             title: commit.title.clone(),
                             number: pr,
-                        })
-                    })
-                    .flatten(),
-            );
-            submit.pr_info.write().insert(commit.id(), pr_info_rx);
+                            commit: commit.id().to_string(),
+                        },
+                    );
+                }
+            }
 
             // Setup the spinner
             let pb = progress.insert(0, ProgressBar::new_spinner());
@@ -412,7 +358,7 @@ pub async fn submit(
                 notify.notified().await;
 
                 let result = submit
-                    .submit_commit(commit, index, &mut progress, branch_name_tx, pr_info_tx)
+                    .submit_commit(commit, index, &mut progress, branch_name_tx)
                     .await;
 
                 if result.is_err() {
@@ -423,19 +369,6 @@ pub async fn submit(
         })
         .collect();
 
-    tokio::spawn({
-        let progress = progress.clone();
-        let submit = submit.clone();
-        let commits = stack.iter().map(|c| c.id()).collect();
-        async move {
-            if let Err(error) = submit.render_footer(commits, footer_tx).await {
-                progress
-                    .println(format!("failed to render footer: {:?}", error))
-                    .ok();
-            }
-        }
-    });
-
     let upstream_pb = progress.insert_from_back(
         0,
         ProgressBar::new_spinner().with_finish(ProgressFinish::AndLeave),
@@ -445,7 +378,11 @@ pub async fn submit(
         .context("invalid style")?;
     upstream_pb.enable_steady_tick(Duration::from_millis(100));
     upstream_pb.set_style(style.clone());
-    upstream_pb.set_prefix(Yellow.paint(format!("* {}", stack.upstream())).to_string());
+    upstream_pb.set_prefix(
+        Yellow
+            .paint(format!("* {}", submit.stack.upstream()))
+            .to_string(),
+    );
 
     let style = ProgressStyle::default_spinner()
         .template("{prefix} {msg}")
@@ -455,7 +392,11 @@ pub async fn submit(
         ProgressBar::new_spinner().with_finish(indicatif::ProgressFinish::AndLeave),
     );
     branch_pb.set_style(style);
-    branch_pb.set_prefix(Yellow.paint(format!("* {}", stack.name())).to_string());
+    branch_pb.set_prefix(
+        Yellow
+            .paint(format!("* {}", submit.stack.name()))
+            .to_string(),
+    );
 
     upstream_pb.set_message("Connecting to remote");
     let mut conn = remote
@@ -464,7 +405,10 @@ pub async fn submit(
     notify.notify_waiters();
 
     upstream_pb.set_message("Pushing branches");
-    submit.pusher.wait_for(stack.len(), conn.remote()).await?;
+    submit
+        .pusher
+        .wait_for(submit.stack.len(), conn.remote())
+        .await?;
 
     upstream_pb.set_message("Updating PRs");
     let results: Vec<_> = tasks.try_collect().await.context("failed to join")?;
