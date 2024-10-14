@@ -366,8 +366,8 @@ pub async fn submit(
     gh_repo: &GHRepo,
     repo: &Repository,
     config: &Config,
+    progress: &MultiProgress,
 ) -> Result<()> {
-    let progress = MultiProgress::new();
     let (footer_tx, footer_rx) = watch::channel(None);
 
     let submit = Arc::new(Submit::new(stack, octocrab, gh_repo, config, footer_rx));

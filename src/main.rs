@@ -4,17 +4,20 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use git2::Repository;
+use tracing_subscriber::EnvFilter;
 
 mod auth;
 mod commit;
 mod config;
 mod gh;
 mod metadata;
+mod progress_tracing;
 mod push;
 mod stack;
 mod submit;
 
 use config::Config;
+use progress_tracing::ProgressTracing;
 use stack::Stack;
 
 #[derive(Parser, Debug)]
@@ -36,8 +39,13 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let progress = ProgressTracing::default();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(progress.clone())
+        .init();
+
     let config = Config::load().context("failed to load config")?;
-    tracing_subscriber::fmt::init();
 
     // Make sure that notes.rewriteRef contains the namespace for fel notes so
     // they are copied along with commits during a rebase or ammend
@@ -91,6 +99,7 @@ async fn main() -> Result<()> {
                 &gh_repo,
                 &repo,
                 &config,
+                &progress.progress,
             )
             .await
             .context("failed to submit")?;
