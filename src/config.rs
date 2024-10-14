@@ -14,10 +14,17 @@ pub struct Submit {
     /// When creating branches during submit, use this field as a prefix
     pub branch_prefix: Option<String>,
 
-    /// When submitting branches, should the commit sha or the index of the commit in the stack
-    /// be used as the branch
+    /// When submitting branches, should the commit sha or the index of the commit
+    /// in the stack be used as the branch
     pub use_indexed_branches: bool,
+
+    /// When submitting a stack, if there is no branch associated with the current
+    /// HEAD create one
     pub auto_create_branches: bool,
+
+    /// When submitting a stack, should the summary and body of the commit message
+    /// always replace the contents of the PR?
+    pub authoritative_commits: bool,
 }
 
 impl Config {

@@ -39,6 +39,7 @@ struct Submit {
     branch_prefix: Option<String>,
     stack_name: String,
     stack_upstream: String,
+    authoritative_commits: bool,
 
     pusher: BatchedPusher,
     footer_rx: watch::Receiver<Option<String>>,
@@ -158,6 +159,10 @@ impl Submit {
         let base_branch = if index == 0 {
             self.stack_upstream.clone()
         } else {
+            // TODO We may need to make sure that the parent branch was actually
+            // finished pushing before we proceed here. Even if the branch name
+            // was cached in the commit metadata if we update the base before
+            // we push the branch, github may get confused.
             let mut rx = self
                 .branch_names
                 .read()
@@ -176,6 +181,32 @@ impl Submit {
         // Now we can create the PR
         let created_pr;
         let pr = match commit.metadata.pr {
+            // If the commit messages are authoritative we
+            // don't need to bother fetching first, we can
+            // just clobber everything.
+            Some(pr) if self.authoritative_commits => {
+                progress.set_message(format!("updating PR {pr}"));
+                created_pr = false;
+
+                // TODO It would be great to dry this out
+                let footer = self
+                    .footer_rx
+                    .clone()
+                    .wait_for(|footer| footer.is_some())
+                    .await
+                    .context("wait for footer")?
+                    .clone()
+                    .context("footer was none")?;
+
+                self.pulls()
+                    .update(pr)
+                    .base(&base_branch)
+                    .title(&commit.title)
+                    .body(&format!("{}\n\n{BODY_DELIM}\n\n{}", commit.body, footer))
+                    .send()
+                    .await
+                    .context("failed to update existing PR")?
+            }
             Some(pr) => {
                 progress.set_message(format!("fetching PR {pr}"));
                 created_pr = false;
@@ -206,33 +237,36 @@ impl Submit {
             title: pr.title.unwrap_or_default(),
         }));
 
-        // We may not have known the pr numbers of every commit in the stack until after
-        // we created all the prs, so now we need to update the prs with the footer
-        // We also may need to update the base branch to restack the prs
-        // TODO If the commit messages are authoritaive we can skip this step and do
-        // this all with only one round trip
-        let footer = self
-            .footer_rx
-            .clone()
-            .wait_for(|footer| footer.is_some())
-            .await
-            .context("wait for footer")?
-            .clone()
-            .context("footer was none")?;
+        // If the commit messages are authoritative we don't need to do this second update step
+        // (unless we had to create the PR in the first place) because we already wrote the
+        // footer when we updated.
+        if !self.authoritative_commits || created_pr {
+            // We may not have known the pr numbers of every commit in the stack until after
+            // we created all the prs, so now we need to update the prs with the footer
+            // We also may need to update the base branch to restack the prs
+            let footer = self
+                .footer_rx
+                .clone()
+                .wait_for(|footer| footer.is_some())
+                .await
+                .context("wait for footer")?
+                .clone()
+                .context("footer was none")?;
 
-        let original_body = pr.body.clone().unwrap_or_default();
-        let original_body = original_body.split(BODY_DELIM).next().unwrap_or_default();
+            let original_body = pr.body.clone().unwrap_or_default();
+            let original_body = original_body.split(BODY_DELIM).next().unwrap_or_default();
 
-        let body = format!("{original_body}\n\n{BODY_DELIM}\n\n{footer}");
+            let body = format!("{original_body}\n\n{BODY_DELIM}\n\n{footer}");
 
-        progress.set_message("updating PR footer");
-        self.pulls()
-            .update(pr.number)
-            .base(base_branch)
-            .body(body)
-            .send()
-            .await
-            .context("failed to update pr")?;
+            progress.set_message("updating PR footer");
+            self.pulls()
+                .update(pr.number)
+                .base(base_branch)
+                .body(body)
+                .send()
+                .await
+                .context("failed to update pr")?;
+        }
 
         let mut history = commit.metadata.history.clone().unwrap_or(Vec::new());
         if Some(commit.id().to_string()) == commit.metadata.commit {
@@ -246,7 +280,6 @@ impl Submit {
             history.push(commit.id().to_string());
         }
 
-        // TODO Update the metadata after the commit
         let metadata = Metadata {
             pr: Some(pr.number),
             branch: Some(branch_name),
@@ -278,6 +311,7 @@ impl Submit {
             gh_repo: gh_repo.clone(),
             stack_name: stack.name().to_string(),
             stack_upstream: stack.upstream().to_string(),
+            authoritative_commits: config.submit.authoritative_commits,
             branch_names,
             pr_info,
             footer_rx,
@@ -351,7 +385,18 @@ pub async fn submit(
                 .write()
                 .insert(commit.id(), branch_name_rx);
 
-            let (pr_info_tx, pr_info_rx) = watch::channel(None);
+            // We may be able to avoid waiting for anything if the commit messages are authoritative
+            let (pr_info_tx, pr_info_rx) = watch::channel(
+                submit
+                    .authoritative_commits
+                    .then(|| {
+                        commit.metadata.pr.map(|pr| PrInfo {
+                            title: commit.title.clone(),
+                            number: pr,
+                        })
+                    })
+                    .flatten(),
+            );
             submit.pr_info.write().insert(commit.id(), pr_info_rx);
 
             // Setup the spinner
