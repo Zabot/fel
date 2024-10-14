@@ -11,25 +11,6 @@ use parking_lot::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::Notify;
 
-type PushResult = Result<(), PushError>;
-
-struct PendingPush {
-    refspec: Refspec,
-    info: oneshot::Sender<PushResult>,
-}
-
-#[derive(Default)]
-pub struct BatchedPusher {
-    pending: Mutex<Vec<PendingPush>>,
-    new_task: Notify,
-}
-
-#[derive(thiserror::Error, Debug, Clone)]
-pub enum PushError {
-    #[error("push rejected by remote: {0}")]
-    Rejected(String),
-}
-
 #[derive(Clone)]
 struct Refspec {
     commit: Oid,
@@ -67,26 +48,54 @@ impl Refspec {
     }
 }
 
+struct PendingPush {
+    refspec: Refspec,
+    info: oneshot::Sender<Result<(), PushError>>,
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum PushError {
+    #[error("push rejected by remote: {0}")]
+    Rejected(String),
+
+    #[error("cancelled by client")]
+    Cancelled,
+}
+
+#[derive(Default)]
+pub struct BatchedPusher {
+    pending: Mutex<Vec<PendingPush>>,
+    new_task: Notify,
+}
+
 impl BatchedPusher {
-    pub async fn push(&self, commit: Oid, branch: String, force: bool) -> Result<()> {
+    /// Push `commit` to the new head of `branch`. `force` overwrites existing references
+    #[tracing::instrument(skip(self))]
+    pub async fn push(&self, commit: Oid, branch: String, force: bool) -> Result<(), PushError> {
         let (tx, rx) = oneshot::channel();
+
         tracing::debug!("waiting for pending lock");
         self.pending.lock().push(PendingPush {
             refspec: Refspec::new(commit, branch, force),
             info: tx,
         });
-        tracing::debug!("pushed to list");
+
+        tracing::debug!("queued push");
         self.new_task.notify_waiters();
-        let result = rx.await.context("recv push result")?;
-        Ok(result?)
+        rx.await.unwrap_or(Err(PushError::Cancelled))
     }
 
+    /// Wait until `count` branches are ready to be pushed, and then push them all
+    /// together to `remote`. Push failures are reported to the individual `push`
+    /// calls.
+    #[tracing::instrument(skip(self, remote), fields(remote=remote.name()))]
     pub async fn wait_for(&self, count: usize, remote: &mut Remote<'_>) -> Result<()> {
         tracing::debug!("waiting for pending pushes");
         let pending = loop {
             {
                 let mut pending_guard = self.pending.lock();
-                tracing::debug!(count = pending_guard.len(), "waiting...");
+
+                tracing::trace!(count = pending_guard.len(), "waiting...");
                 if pending_guard.len() >= count {
                     let old: Vec<PendingPush> = std::mem::take(pending_guard.as_mut());
                     break old;
@@ -152,9 +161,6 @@ impl BatchedPusher {
                 Some(PushOptions::default().remote_callbacks(callbacks)),
             )
         })
-        .context("failed to push")?;
-        tracing::debug!("push finished");
-
-        Ok(())
+        .context("failed to push")
     }
 }
