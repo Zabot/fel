@@ -164,3 +164,108 @@ impl BatchedPusher {
         .context("failed to push")
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use crate::test_repo::TestRepo;
+
+    use super::BatchedPusher;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn push_branches() {
+        let repo = TestRepo::new();
+
+        // Setup the pusher
+        let pusher = Arc::new(BatchedPusher::default());
+
+        // Make some commits and schedule them to push
+        let commit_names = vec!["commit1", "commit2", "commit3"];
+        let mut commit_ids = Vec::new();
+        let mut tasks = Vec::new();
+        for name in commit_names.iter() {
+            let commit = repo.commit(name);
+            commit_ids.push(commit.clone());
+
+            let name = name.to_string();
+            let pusher = pusher.clone();
+            tasks.push(tokio::spawn(async move {
+                pusher.push(commit, name, false).await
+            }))
+        }
+
+        // Do the push
+        let mut remote_conn = repo.remote();
+        pusher
+            .wait_for(commit_names.len(), &mut remote_conn)
+            .await
+            .unwrap();
+
+        // Wait for all of the push tasks to finish
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+
+        // Make sure all of the branches were pushed correctly
+        for (name, id) in commit_names.iter().zip(commit_ids) {
+            repo.assert_pushed(name, id);
+        }
+
+        // Make some new commits and push again, they should fail because
+        // force is false
+        repo.checkout(repo.initial_commit());
+        let mut commit_ids = Vec::new();
+        let mut tasks = Vec::new();
+        for name in commit_names.iter() {
+            let commit = repo.commit(name);
+            commit_ids.push(commit.clone());
+
+            let name = name.to_string();
+            let pusher = pusher.clone();
+            tasks.push(tokio::spawn(async move {
+                pusher.push(commit, name, false).await
+            }))
+        }
+
+        pusher
+            .wait_for(commit_names.len(), &mut remote_conn)
+            .await
+            .unwrap_err();
+
+        // Pushes should fail because force is false
+        for task in tasks {
+            task.await.unwrap().unwrap_err();
+        }
+
+        // One more time, this time with force set
+        repo.checkout(repo.initial_commit());
+        let mut commit_ids = Vec::new();
+        let mut tasks = Vec::new();
+        for name in commit_names.iter() {
+            let commit = repo.commit(name);
+            commit_ids.push(commit.clone());
+
+            let name = name.to_string();
+            let pusher = pusher.clone();
+            tasks.push(tokio::spawn(async move {
+                pusher.push(commit, name, true).await
+            }))
+        }
+
+        pusher
+            .wait_for(commit_names.len(), &mut remote_conn)
+            .await
+            .unwrap();
+
+        // Pushes should fail because force is false
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+
+        // Make sure the branches were updated
+        for (name, id) in commit_names.iter().zip(commit_ids) {
+            repo.assert_pushed(name, id);
+        }
+    }
+}

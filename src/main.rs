@@ -21,6 +21,9 @@ mod render;
 mod stack;
 mod submit;
 
+#[cfg(test)]
+mod test_repo;
+
 use config::Config;
 use progress_tracing::ProgressTracing;
 use stack::Stack;
