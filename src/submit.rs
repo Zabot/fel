@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,10 +8,10 @@ use anyhow::{Context, Result};
 use futures::{stream::FuturesUnordered, TryStreamExt};
 use git2::{Oid, Remote, Repository};
 use indicatif::{MultiProgress, ProgressBar, ProgressFinish, ProgressStyle};
-use parking_lot::RwLock;
-use tokio::sync::{watch, Notify};
+use tokio::sync::Notify;
 
 use crate::auth;
+use crate::await_map::AwaitMap;
 use crate::commit::Commit;
 use crate::config::Config;
 use crate::metadata::Metadata;
@@ -30,8 +29,7 @@ struct Submit {
     stack: Stack,
     pusher: BatchedPusher,
     render_store: RenderStore<TeraRender>,
-
-    branch_names: RwLock<HashMap<git2::Oid, watch::Receiver<Option<String>>>>,
+    branch_names: AwaitMap<Oid, String>,
 }
 
 struct SubmitProgress {
@@ -109,7 +107,6 @@ impl Submit {
         commit: Commit,
         index: usize,
         progress: &mut SubmitProgress,
-        branch_name_tx: watch::Sender<Option<String>>,
     ) -> Result<(Oid, Metadata)> {
         // Figure out the branch name
         let force_push = commit.metadata.branch.is_some();
@@ -138,7 +135,7 @@ impl Submit {
             .await
             .context("push branch")?;
 
-        branch_name_tx.send_replace(Some(branch_name.clone()));
+        self.branch_names.insert(commit.id(), branch_name.clone());
 
         // Now we need to figure out the branch name of the parent
         let base_branch = if index == 0 {
@@ -148,19 +145,7 @@ impl Submit {
             // finished pushing before we proceed here. Even if the branch name
             // was cached in the commit metadata if we update the base before
             // we push the branch, github may get confused.
-            let mut rx = self
-                .branch_names
-                .read()
-                .get(commit.parent())
-                .context("parent commit unknown")?
-                .clone();
-
-            let branch = rx
-                .wait_for(|branch| branch.is_some())
-                .await
-                .context("wait for parent branch")?;
-
-            branch.clone().context("branch was none")?
+            self.branch_names.get(commit.parent()).await
         };
 
         // Now we can create the PR
@@ -275,7 +260,6 @@ impl Submit {
 
     fn new(stack: Stack, pulls: PR, config: &Config) -> Self {
         let pusher = BatchedPusher::default();
-        let branch_names = RwLock::new(HashMap::new());
 
         let render = TeraRender::new().unwrap();
         let render_store = RenderStore::new(render);
@@ -286,7 +270,7 @@ impl Submit {
             branch_prefix: config.submit.branch_prefix.clone(),
             pulls,
             authoritative_commits: config.submit.authoritative_commits,
-            branch_names,
+            branch_names: AwaitMap::new(),
             render_store,
             stack,
         }
@@ -311,11 +295,12 @@ pub async fn submit(
         .cloned()
         .enumerate()
         .map(|(index, commit)| {
-            let (branch_name_tx, branch_name_rx) = watch::channel(commit.metadata.branch.clone());
-            submit
-                .branch_names
-                .write()
-                .insert(commit.id(), branch_name_rx);
+            // TODO We actually may not want to do this, since it could confuse
+            // GH if we create a PR on a base branch before we update the base
+            // branch.
+            if let Some(branch) = commit.metadata.branch.clone() {
+                submit.branch_names.insert(commit.id(), branch)
+            }
 
             // If commit messages are authoritative we don't need to wait for GH to tell us
             // information about the commit
@@ -344,9 +329,7 @@ pub async fn submit(
                 // Wait for the remote connection before proceding
                 notify.notified().await;
 
-                let result = submit
-                    .submit_commit(commit, index, &mut progress, branch_name_tx)
-                    .await;
+                let result = submit.submit_commit(commit, index, &mut progress).await;
 
                 if result.is_err() {
                     progress.finish("failed", Red)?;
