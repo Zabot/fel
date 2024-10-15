@@ -92,7 +92,7 @@ impl PR {
         let new_body = match (data.body, data.footer) {
             (Some(body), Some(footer)) => Some(join_footer(&body, &footer)),
             (Some(body), None) => Some(join_footer(&body, original_footer)),
-            (None, Some(footer)) => Some(join_footer(&original_body, &footer)),
+            (None, Some(footer)) => Some(join_footer(original_body, &footer)),
             (None, None) => None,
         };
 

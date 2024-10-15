@@ -41,8 +41,6 @@ impl MakeWriter<'_> for ProgressTracing {
             progress: Some(self.progress.clone()),
             inner: io::stderr(),
         };
-        let writer = LineWriter::new(writer);
-
-        writer
+        LineWriter::new(writer)
     }
 }
