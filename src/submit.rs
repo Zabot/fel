@@ -1,45 +1,37 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
 use ansi_term::Colour::{Green, Red, Yellow};
 use ansi_term::{Color, Style};
 use anyhow::{Context, Result};
 use futures::{stream::FuturesUnordered, TryStreamExt};
 use git2::{Oid, Remote, Repository};
 use indicatif::{MultiProgress, ProgressBar, ProgressFinish, ProgressStyle};
-use octocrab::pulls::PullRequestHandler;
-use octocrab::Octocrab;
 use parking_lot::RwLock;
 use tokio::sync::{watch, Notify};
 
 use crate::auth;
 use crate::commit::Commit;
 use crate::config::Config;
-use crate::gh::GHRepo;
 use crate::metadata::Metadata;
+use crate::pr::{NewPr, PartialUpdate, PR};
 use crate::push::BatchedPusher;
 use crate::render::{RenderInfo, RenderStore, TeraRender};
 use crate::stack::Stack;
 
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-
-const BODY_DELIM: &str = "[#]:fel";
-
 struct Submit {
-    octocrab: Arc<Octocrab>,
-    gh_repo: GHRepo,
-
     use_indexed_branches: bool,
     branch_prefix: Option<String>,
     authoritative_commits: bool,
 
+    pulls: PR,
     stack: Stack,
-
     pusher: BatchedPusher,
+    render_store: RenderStore<TeraRender>,
 
     branch_names: RwLock<HashMap<git2::Oid, watch::Receiver<Option<String>>>>,
-
-    render_store: Arc<RenderStore<TeraRender>>,
 }
 
 struct SubmitProgress {
@@ -112,10 +104,6 @@ impl SubmitProgress {
 }
 
 impl Submit {
-    fn pulls(&self) -> PullRequestHandler {
-        self.octocrab.pulls(&self.gh_repo.owner, &self.gh_repo.repo)
-    }
-
     async fn submit_commit(
         &self,
         commit: Commit,
@@ -177,6 +165,13 @@ impl Submit {
 
         // Now we can create the PR
         let created_pr;
+        let pr_data = NewPr {
+            base: base_branch.clone(),
+            body: commit.body.clone(),
+            title: commit.title.clone(),
+            branch: branch_name.clone(),
+        };
+
         let pr = match commit.metadata.pr {
             // If the commit messages are authoritative we
             // don't need to bother fetching first, we can
@@ -190,19 +185,16 @@ impl Submit {
                     .render_stack(commit.id(), &self.stack)
                     .await?;
 
-                self.pulls()
-                    .update(pr)
-                    .base(&base_branch)
-                    .title(&commit.title)
-                    .body(&format!("{}\n\n{BODY_DELIM}\n\n{}", commit.body, footer))
-                    .send()
+                self.pulls
+                    .replace(pr, footer, pr_data)
                     .await
                     .context("failed to update existing PR")?
             }
             Some(pr) => {
                 progress.set_message(format!("fetching PR {pr}"));
                 created_pr = false;
-                self.pulls()
+
+                self.pulls
                     .get(pr)
                     .await
                     .context("failed to get existing PR")?
@@ -210,13 +202,11 @@ impl Submit {
             None => {
                 progress.set_message("creating PR");
                 created_pr = true;
-                tracing::debug!(branch_name, base_branch, "creating PR");
-                self.pulls()
-                    .create(&commit.title, &branch_name, &base_branch)
-                    .body(&commit.body)
-                    .send()
+
+                self.pulls
+                    .create(pr_data)
                     .await
-                    .context("failed to create pr")?
+                    .context("failed to create PR")?
             }
         };
 
@@ -228,7 +218,7 @@ impl Submit {
             commit.id(),
             RenderInfo {
                 number: pr.number,
-                title: pr.title.unwrap_or_default(),
+                title: pr.title.clone().unwrap_or_default(),
                 commit: commit.id().to_string(),
             },
         );
@@ -245,19 +235,18 @@ impl Submit {
                 .render_stack(commit.id(), &self.stack)
                 .await?;
 
-            let original_body = pr.body.clone().unwrap_or_default();
-            let original_body = original_body.split(BODY_DELIM).next().unwrap_or_default();
-
-            let body = format!("{original_body}\n\n{BODY_DELIM}\n\n{footer}");
-
             progress.set_message("updating PR footer");
-            self.pulls()
-                .update(pr.number)
-                .base(base_branch)
-                .body(body)
-                .send()
+            self.pulls
+                .update(
+                    &pr,
+                    PartialUpdate {
+                        base: Some(base_branch.clone()),
+                        footer: Some(footer.clone()),
+                        ..Default::default()
+                    },
+                )
                 .await
-                .context("failed to update pr")?;
+                .context("failed to update existing PR")?;
         }
 
         let mut history = commit.metadata.history.clone().unwrap_or(Vec::new());
@@ -284,19 +273,18 @@ impl Submit {
         Ok::<_, anyhow::Error>((commit.id(), metadata))
     }
 
-    fn new(stack: Stack, octocrab: Arc<Octocrab>, gh_repo: &GHRepo, config: &Config) -> Self {
+    fn new(stack: Stack, pulls: PR, config: &Config) -> Self {
         let pusher = BatchedPusher::default();
         let branch_names = RwLock::new(HashMap::new());
 
         let render = TeraRender::new().unwrap();
-        let render_store = Arc::new(RenderStore::new(render));
+        let render_store = RenderStore::new(render);
 
         Self {
             pusher,
             use_indexed_branches: config.submit.use_indexed_branches,
             branch_prefix: config.submit.branch_prefix.clone(),
-            octocrab,
-            gh_repo: gh_repo.clone(),
+            pulls,
             authoritative_commits: config.submit.authoritative_commits,
             branch_names,
             render_store,
@@ -308,13 +296,12 @@ impl Submit {
 pub async fn submit(
     stack: Stack,
     remote: &mut Remote<'_>,
-    octocrab: Arc<Octocrab>,
-    gh_repo: &GHRepo,
+    pulls: PR,
     repo: &Repository,
     config: &Config,
     progress: &MultiProgress,
 ) -> Result<()> {
-    let submit = Arc::new(Submit::new(stack, octocrab, gh_repo, config));
+    let submit = Arc::new(Submit::new(stack, pulls, config));
 
     let notify = Arc::new(Notify::new());
 

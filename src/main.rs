@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use git2::Repository;
+use pr::PR;
 use tracing_subscriber::EnvFilter;
 
 mod auth;
@@ -11,6 +12,7 @@ mod commit;
 mod config;
 mod gh;
 mod metadata;
+mod pr;
 mod progress_tracing;
 mod push;
 mod render;
@@ -83,6 +85,7 @@ async fn main() -> Result<()> {
         .context("failed to get remote")?;
 
     let gh_repo = gh::get_repo(&remote).context("failed to get repo")?;
+    let pulls = PR::new(octocrab, gh_repo.clone());
 
     match cli.command {
         Commands::Submit => {
@@ -96,8 +99,7 @@ async fn main() -> Result<()> {
             submit::submit(
                 stack,
                 &mut remote,
-                octocrab.clone(),
-                &gh_repo,
+                pulls,
                 &repo,
                 &config,
                 &progress.progress,
