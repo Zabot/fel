@@ -20,7 +20,7 @@ use crate::push::BatchedPusher;
 use crate::render::{RenderInfo, RenderStore, TeraRender};
 use crate::stack::Stack;
 
-struct Submit {
+pub struct Submit {
     use_indexed_branches: bool,
     branch_prefix: Option<String>,
     authoritative_commits: bool,
@@ -102,6 +102,138 @@ impl SubmitProgress {
 }
 
 impl Submit {
+    pub fn new(stack: Stack, pulls: PR, config: &Config) -> Self {
+        let pusher = BatchedPusher::default();
+
+        let render = TeraRender::new().unwrap();
+        let render_store = RenderStore::new(render);
+
+        Self {
+            pusher,
+            use_indexed_branches: config.submit.use_indexed_branches,
+            branch_prefix: config.submit.branch_prefix.clone(),
+            pulls,
+            authoritative_commits: config.submit.authoritative_commits,
+            branch_names: AwaitMap::new(),
+            render_store,
+            stack,
+        }
+    }
+
+    pub async fn run(
+        self: &Arc<Self>,
+        remote: &mut Remote<'_>,
+        repo: &Repository,
+        progress: &MultiProgress,
+    ) -> Result<()> {
+        let notify = Arc::new(Notify::new());
+
+        let tasks: FuturesUnordered<_> = self
+            .stack
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, commit)| {
+                // TODO We actually may not want to do this, since it could confuse
+                // GH if we create a PR on a base branch before we update the base
+                // branch.
+                if let Some(branch) = commit.metadata.branch.clone() {
+                    self.branch_names.insert(commit.id(), branch)
+                }
+
+                // If commit messages are authoritative we don't need to wait for GH to tell us
+                // information about the commit
+                if self.authoritative_commits {
+                    if let Some(pr) = commit.metadata.pr {
+                        self.render_store.record(
+                            commit.id(),
+                            RenderInfo {
+                                title: commit.title.clone(),
+                                number: pr,
+                                commit: commit.id().to_string(),
+                            },
+                        );
+                    }
+                }
+
+                // Setup the spinner
+                let pb = progress.insert(0, ProgressBar::new_spinner());
+                pb.enable_steady_tick(Duration::from_millis(100));
+                let mut progress = SubmitProgress::new(&commit, pb).unwrap();
+                progress.set_message("connecting to remote");
+
+                let notify = notify.clone();
+                let submit = self.clone();
+                tokio::spawn(async move {
+                    // Wait for the remote connection before proceding
+                    notify.notified().await;
+
+                    let result = submit.submit_commit(commit, index, &mut progress).await;
+
+                    if result.is_err() {
+                        progress.finish("failed", Red)?;
+                    }
+                    result
+                })
+            })
+            .collect();
+
+        let upstream_pb = progress.insert_from_back(
+            0,
+            ProgressBar::new_spinner().with_finish(ProgressFinish::AndLeave),
+        );
+        let style = ProgressStyle::default_spinner()
+            .template("{prefix} {spinner} {msg}")
+            .context("invalid style")?;
+        upstream_pb.enable_steady_tick(Duration::from_millis(100));
+        upstream_pb.set_style(style.clone());
+        upstream_pb.set_prefix(
+            Yellow
+                .paint(format!("* {}", self.stack.upstream()))
+                .to_string(),
+        );
+
+        let style = ProgressStyle::default_spinner()
+            .template("{prefix} {msg}")
+            .context("invalid style")?;
+        let branch_pb = progress.insert(
+            0,
+            ProgressBar::new_spinner().with_finish(indicatif::ProgressFinish::AndLeave),
+        );
+        branch_pb.set_style(style);
+        branch_pb.set_prefix(Yellow.paint(format!("* {}", self.stack.name())).to_string());
+
+        upstream_pb.set_message("Connecting to remote");
+        let mut conn = remote
+            .connect_auth(git2::Direction::Push, Some(auth::callbacks()), None)
+            .context("failed to connect to repo")?;
+        notify.notify_waiters();
+
+        upstream_pb.set_message("Pushing branches");
+        self.pusher
+            .wait_for(self.stack.len(), conn.remote())
+            .await?;
+
+        upstream_pb.set_message("Updating PRs");
+        let results: Vec<_> = tasks.try_collect().await.context("failed to join")?;
+
+        // Update all of the commit notes with the new metadata
+        // We have to to this on this thread because Repository
+        // is not thread safe.
+        upstream_pb.set_message("Writing metadata");
+        for result in results.into_iter() {
+            let (id, metadata) = result.context("push failed")?;
+
+            metadata
+                .write(repo, id)
+                .context("failed to write commit metadata")?;
+        }
+
+        upstream_pb.finish_with_message("");
+
+        Ok(())
+    }
+
     async fn submit_commit(
         &self,
         commit: Commit,
@@ -257,145 +389,4 @@ impl Submit {
 
         Ok::<_, anyhow::Error>((commit.id(), metadata))
     }
-
-    fn new(stack: Stack, pulls: PR, config: &Config) -> Self {
-        let pusher = BatchedPusher::default();
-
-        let render = TeraRender::new().unwrap();
-        let render_store = RenderStore::new(render);
-
-        Self {
-            pusher,
-            use_indexed_branches: config.submit.use_indexed_branches,
-            branch_prefix: config.submit.branch_prefix.clone(),
-            pulls,
-            authoritative_commits: config.submit.authoritative_commits,
-            branch_names: AwaitMap::new(),
-            render_store,
-            stack,
-        }
-    }
-}
-
-pub async fn submit(
-    stack: Stack,
-    remote: &mut Remote<'_>,
-    pulls: PR,
-    repo: &Repository,
-    config: &Config,
-    progress: &MultiProgress,
-) -> Result<()> {
-    let submit = Arc::new(Submit::new(stack, pulls, config));
-
-    let notify = Arc::new(Notify::new());
-
-    let tasks: FuturesUnordered<_> = submit
-        .stack
-        .iter()
-        .cloned()
-        .enumerate()
-        .map(|(index, commit)| {
-            // TODO We actually may not want to do this, since it could confuse
-            // GH if we create a PR on a base branch before we update the base
-            // branch.
-            if let Some(branch) = commit.metadata.branch.clone() {
-                submit.branch_names.insert(commit.id(), branch)
-            }
-
-            // If commit messages are authoritative we don't need to wait for GH to tell us
-            // information about the commit
-            if submit.authoritative_commits {
-                if let Some(pr) = commit.metadata.pr {
-                    submit.render_store.record(
-                        commit.id(),
-                        RenderInfo {
-                            title: commit.title.clone(),
-                            number: pr,
-                            commit: commit.id().to_string(),
-                        },
-                    );
-                }
-            }
-
-            // Setup the spinner
-            let pb = progress.insert(0, ProgressBar::new_spinner());
-            pb.enable_steady_tick(Duration::from_millis(100));
-            let mut progress = SubmitProgress::new(&commit, pb).unwrap();
-            progress.set_message("connecting to remote");
-
-            let notify = notify.clone();
-            let submit = submit.clone();
-            tokio::spawn(async move {
-                // Wait for the remote connection before proceding
-                notify.notified().await;
-
-                let result = submit.submit_commit(commit, index, &mut progress).await;
-
-                if result.is_err() {
-                    progress.finish("failed", Red)?;
-                }
-                result
-            })
-        })
-        .collect();
-
-    let upstream_pb = progress.insert_from_back(
-        0,
-        ProgressBar::new_spinner().with_finish(ProgressFinish::AndLeave),
-    );
-    let style = ProgressStyle::default_spinner()
-        .template("{prefix} {spinner} {msg}")
-        .context("invalid style")?;
-    upstream_pb.enable_steady_tick(Duration::from_millis(100));
-    upstream_pb.set_style(style.clone());
-    upstream_pb.set_prefix(
-        Yellow
-            .paint(format!("* {}", submit.stack.upstream()))
-            .to_string(),
-    );
-
-    let style = ProgressStyle::default_spinner()
-        .template("{prefix} {msg}")
-        .context("invalid style")?;
-    let branch_pb = progress.insert(
-        0,
-        ProgressBar::new_spinner().with_finish(indicatif::ProgressFinish::AndLeave),
-    );
-    branch_pb.set_style(style);
-    branch_pb.set_prefix(
-        Yellow
-            .paint(format!("* {}", submit.stack.name()))
-            .to_string(),
-    );
-
-    upstream_pb.set_message("Connecting to remote");
-    let mut conn = remote
-        .connect_auth(git2::Direction::Push, Some(auth::callbacks()), None)
-        .context("failed to connect to repo")?;
-    notify.notify_waiters();
-
-    upstream_pb.set_message("Pushing branches");
-    submit
-        .pusher
-        .wait_for(submit.stack.len(), conn.remote())
-        .await?;
-
-    upstream_pb.set_message("Updating PRs");
-    let results: Vec<_> = tasks.try_collect().await.context("failed to join")?;
-
-    // Update all of the commit notes with the new metadata
-    // We have to to this on this thread because Repository
-    // is not thread safe.
-    upstream_pb.set_message("Writing metadata");
-    for result in results.into_iter() {
-        let (id, metadata) = result.context("push failed")?;
-
-        metadata
-            .write(repo, id)
-            .context("failed to write commit metadata")?;
-    }
-
-    upstream_pb.finish_with_message("");
-
-    Ok(())
 }

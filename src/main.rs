@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use git2::Repository;
 use pr::PR;
+use submit::Submit;
 use tracing_subscriber::EnvFilter;
 
 mod auth;
@@ -97,16 +98,11 @@ async fn main() -> Result<()> {
             }
 
             // Push every commit
-            submit::submit(
-                stack,
-                &mut remote,
-                pulls,
-                &repo,
-                &config,
-                &progress.progress,
-            )
-            .await
-            .context("failed to submit")?;
+            let submit = Submit::new(stack, pulls, &config);
+            Arc::new(submit)
+                .run(&mut remote, &repo, &progress.progress)
+                .await
+                .context("failed to submit")?;
         }
     }
     Ok(())
