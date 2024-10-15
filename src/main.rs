@@ -8,6 +8,7 @@ use pr::PR;
 use tracing_subscriber::EnvFilter;
 
 mod auth;
+mod await_map;
 mod commit;
 mod config;
 mod gh;

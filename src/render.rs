@@ -1,12 +1,8 @@
-use std::collections::HashMap;
-
 use anyhow::{Context, Result};
 use git2::Oid;
-use parking_lot::RwLock;
 use tera::Tera;
-use tokio::sync::Notify;
 
-use crate::stack::Stack;
+use crate::{await_map::AwaitMap, stack::Stack};
 
 pub trait StackRenderer {
     fn render(&self, commit: Oid, info: &[RenderInfo], stack: &Stack) -> Result<String>;
@@ -20,8 +16,7 @@ pub struct RenderInfo {
 }
 
 pub struct RenderStore<R: StackRenderer> {
-    commit_added: Notify,
-    commit_info: RwLock<HashMap<Oid, RenderInfo>>,
+    commits: AwaitMap<Oid, RenderInfo>,
     renderer: R,
 }
 
@@ -29,25 +24,18 @@ impl<R: StackRenderer> RenderStore<R> {
     pub fn new(renderer: R) -> Self {
         Self {
             renderer,
-            commit_added: Notify::new(),
-            commit_info: RwLock::new(HashMap::new()),
+            commits: AwaitMap::new(),
         }
     }
 
     /// Record the render `info` for `commit`
     pub fn record(&self, commit: Oid, info: RenderInfo) {
-        self.commit_info.write().insert(commit, info);
-        self.commit_added.notify_waiters();
+        self.commits.insert(commit, info)
     }
 
     /// Get the render info for a specific commit
     async fn get_commit(&self, commit: &Oid) -> RenderInfo {
-        loop {
-            if let Some(info) = self.commit_info.read().get(commit) {
-                return info.clone();
-            }
-            self.commit_added.notified().await
-        }
+        self.commits.get(commit).await
     }
 
     /// Given a list of `commits`, wait until information is available for all
