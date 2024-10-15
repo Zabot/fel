@@ -5,22 +5,20 @@ use tera::Tera;
 use crate::{await_map::AwaitMap, stack::Stack};
 
 pub trait StackRenderer {
-    fn render(&self, commit: Oid, info: &[RenderInfo], stack: &Stack) -> Result<String>;
-}
+    type RenderInfo: serde::Serialize + Clone;
 
-#[derive(serde::Serialize, Clone)]
-pub struct RenderInfo {
-    pub number: u64,
-    pub title: String,
-    pub commit: String,
+    fn render(&self, commit: Oid, info: &[Self::RenderInfo], stack: &Stack) -> Result<String>;
 }
 
 pub struct RenderStore<R: StackRenderer> {
-    commits: AwaitMap<Oid, RenderInfo>,
+    commits: AwaitMap<Oid, R::RenderInfo>,
     renderer: R,
 }
 
-impl<R: StackRenderer> RenderStore<R> {
+impl<R> RenderStore<R>
+where
+    R: StackRenderer,
+{
     pub fn new(renderer: R) -> Self {
         Self {
             renderer,
@@ -29,18 +27,18 @@ impl<R: StackRenderer> RenderStore<R> {
     }
 
     /// Record the render `info` for `commit`
-    pub fn record(&self, commit: Oid, info: RenderInfo) {
+    pub fn record(&self, commit: Oid, info: R::RenderInfo) {
         self.commits.insert(commit, info)
     }
 
     /// Get the render info for a specific commit
-    async fn get_commit(&self, commit: &Oid) -> RenderInfo {
+    async fn get_commit(&self, commit: &Oid) -> R::RenderInfo {
         self.commits.get(commit).await
     }
 
     /// Given a list of `commits`, wait until information is available for all
     /// of them, then return the info in the same order
-    async fn get_info(&self, commits: &[Oid]) -> Vec<RenderInfo> {
+    async fn get_info(&self, commits: &[Oid]) -> Vec<R::RenderInfo> {
         let mut info_vec = Vec::new();
         for commit in commits {
             let info = self.get_commit(commit).await;
@@ -70,8 +68,17 @@ impl TeraRender {
     }
 }
 
+#[derive(serde::Serialize, Clone)]
+pub struct TeraRenderInfo {
+    pub number: u64,
+    pub title: String,
+    pub commit: String,
+}
+
 impl StackRenderer for TeraRender {
-    fn render(&self, commit: Oid, info: &[RenderInfo], stack: &Stack) -> Result<String> {
+    type RenderInfo = TeraRenderInfo;
+
+    fn render(&self, commit: Oid, info: &[Self::RenderInfo], stack: &Stack) -> Result<String> {
         let mut context = tera::Context::new();
         context.insert("prs", info);
         context.insert("stack_name", stack.name());

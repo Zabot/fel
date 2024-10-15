@@ -17,7 +17,7 @@ use crate::config::Config;
 use crate::metadata::Metadata;
 use crate::pr::{NewPr, PartialUpdate, PR};
 use crate::push::BatchedPusher;
-use crate::render::{RenderInfo, RenderStore, TeraRender};
+use crate::render::{RenderStore, TeraRender, TeraRenderInfo};
 use crate::stack::Stack;
 
 pub struct Submit {
@@ -147,7 +147,7 @@ impl Submit {
                     if let Some(pr) = commit.metadata.pr {
                         self.render_store.record(
                             commit.id(),
-                            RenderInfo {
+                            TeraRenderInfo {
                                 title: commit.title.clone(),
                                 number: pr,
                                 commit: commit.id().to_string(),
@@ -333,7 +333,7 @@ impl Submit {
         progress.update()?;
         self.render_store.record(
             commit.id(),
-            RenderInfo {
+            TeraRenderInfo {
                 number: pr.number,
                 title: pr.title.clone().unwrap_or_default(),
                 commit: commit.id().to_string(),
